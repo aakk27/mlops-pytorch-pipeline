@@ -225,19 +225,27 @@ def main() -> int:
         subset_fraction=float(data_cfg.get("subset_fraction", 1.0)),
     )
 
+    data_started = time.time()
     train_loader, val_loader = get_dataloaders(
         data_dir=data_cfg["data_dir"],
         batch_size=int(train_cfg["batch_size"]),
         num_workers=int(train_cfg.get("num_workers", 2)),
         subset_fraction=float(data_cfg.get("subset_fraction", 1.0)),
         seed=seed,
+        # Pinned host memory only accelerates CUDA transfers. MPS does not
+        # support it and warns on every loader; on CPU there is no transfer.
+        pin_memory=device.type == "cuda",
     )
+    data_seconds = time.time() - data_started
     log(
         event="data_ready",
         train_batches=len(train_loader),
         val_batches=len(val_loader),
         train_examples=len(train_loader.dataset),  # type: ignore[arg-type]
         val_examples=len(val_loader.dataset),  # type: ignore[arg-type]
+        # Dominated by the one-off dataset download on a cold volume. Reported
+        # separately so it is never mistaken for training time.
+        data_seconds=round(data_seconds, 1),
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=float(train_cfg["learning_rate"]))
@@ -253,6 +261,7 @@ def main() -> int:
     save_path = checkpoint_dir / out_cfg["model_name"]
 
     epochs = int(train_cfg["epochs"])
+    training_started = time.time()
     for epoch in range(1, epochs + 1):
         epoch_started = time.time()
         train_loss, train_acc = train_one_epoch(model, train_loader, optimizer, criterion, device)
@@ -299,6 +308,10 @@ def main() -> int:
         best_val_loss=round(best_val_loss, 4),
         best_val_accuracy=round(best_val_accuracy, 4),
         checkpoint=str(save_path),
+        # training_seconds covers the epoch loop alone; total_seconds is
+        # wall-clock for the whole process and includes dataset preparation.
+        training_seconds=round(time.time() - training_started, 1),
+        data_seconds=round(data_seconds, 1),
         total_seconds=round(time.time() - started, 1),
     )
     return 0

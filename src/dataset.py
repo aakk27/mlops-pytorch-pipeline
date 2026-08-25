@@ -60,6 +60,7 @@ def get_dataloaders(
     subset_fraction: float = 1.0,
     seed: int = 42,
     download: bool = True,
+    pin_memory: bool = False,
 ) -> tuple[DataLoader, DataLoader]:
     """Build the CIFAR-10 training and validation loaders.
 
@@ -71,6 +72,9 @@ def get_dataloaders(
         subset_fraction: Fraction of each split to use, in ``(0, 1]``.
         seed: Seed controlling the subset sample.
         download: Whether torchvision may fetch the dataset if absent.
+        pin_memory: Page-lock host memory to speed up host-to-device copies.
+            Only meaningful for CUDA; MPS does not support it and warns, and on
+            CPU there is no transfer to accelerate. The caller decides.
 
     Raises:
         ValueError: If ``subset_fraction`` is outside ``(0, 1]``.
@@ -100,7 +104,7 @@ def get_dataloaders(
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=pin_memory,
         # Re-using workers avoids paying process start-up on every epoch.
         persistent_workers=num_workers > 0,
     )
@@ -109,7 +113,7 @@ def get_dataloaders(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
     )
     return train_loader, val_loader
