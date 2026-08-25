@@ -23,7 +23,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install ruff
-        run: pip install ruff==0.6.9
+        run: pip install ruff==0.16.4
 
       - name: Ruff check
         run: ruff check src tests
@@ -54,7 +54,7 @@ jobs:
           pip install --index-url https://download.pytorch.org/whl/cpu \
                       --extra-index-url https://pypi.org/simple \
                       -r requirements/train.txt
-          pip install pytest==8.3.3
+          pip install pytest==9.1.1 httpx==0.28.1
 
       - name: Run tests
         run: pytest tests -v
