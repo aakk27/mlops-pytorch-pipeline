@@ -1,0 +1,73 @@
+# syntax=docker/dockerfile:1.7
+#
+# Serving image — inference only.
+#
+# Differs from the training image in four deliberate ways:
+#   1. It installs requirements/serve.txt, which excludes every training-only
+#      library, so nothing that is not needed to answer a request is shipped.
+#   2. It copies only the two modules inference actually imports — serve.py and
+#      model.py. train.py and dataset.py are absent from the image entirely.
+#   3. It runs as an unprivileged user.
+#   4. It declares a HEALTHCHECK so the container runtime can see whether the
+#      model is loaded, matching the probe Kubernetes uses.
+
+# ---------------------------------------------------------------------------
+# Stage 1: dependency builder
+# ---------------------------------------------------------------------------
+FROM python:3.11-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
+
+WORKDIR /app
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY requirements/serve.txt ./requirements/serve.txt
+RUN pip install --no-cache-dir -r requirements/serve.txt
+
+# ---------------------------------------------------------------------------
+# Stage 2: serving runtime
+# ---------------------------------------------------------------------------
+FROM python:3.11-slim AS serving
+
+LABEL org.opencontainers.image.title="mlops-pytorch-pipeline-serve" \
+      org.opencontainers.image.description="CIFAR-10 inference API" \
+      org.opencontainers.image.source="https://github.com/aakk27/mlops-pytorch-pipeline"
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    MODEL_CHECKPOINT_PATH=/app/checkpoints/classifier_v1.pt \
+    SERVE_PORT=8080
+
+# A fixed, non-zero UID/GID. Kubernetes can then assert runAsNonRoot without
+# having to resolve a name, and the numeric owner is stable across rebuilds.
+RUN groupadd --gid 1001 appgroup \
+ && useradd --uid 1001 --gid appgroup --create-home --shell /usr/sbin/nologin appuser
+
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+
+# Only what inference imports. serve.py imports model.py for the architecture
+# factory; nothing here reaches for the training or dataset modules.
+COPY src/serve.py src/model.py ./src/
+
+# The mount point must exist before the read-only PVC is mounted over it.
+RUN mkdir -p /app/checkpoints \
+ && chown -R appuser:appgroup /app
+
+USER appuser
+
+EXPOSE 8080
+
+# Uses the stdlib rather than curl, which a slim image does not carry. urlopen
+# raises on any non-2xx response, so a 503 from an unloaded model exits non-zero
+# and the container is correctly reported unhealthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4)" || exit 1
+
+CMD ["python", "src/serve.py"]
