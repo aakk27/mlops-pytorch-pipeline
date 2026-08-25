@@ -1,0 +1,10 @@
+# Training dependencies — all versions pinned for reproducible image builds.
+# CPU-only PyTorch wheels keep the training image an order of magnitude smaller
+# than the default CUDA-enabled wheels from PyPI.
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+
+torch==2.13.0
+torchvision==0.28.0
+numpy==2.4.6
+PyYAML==6.0.3
