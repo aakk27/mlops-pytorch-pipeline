@@ -216,3 +216,37 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------
+# MLOps project-specific ignores
+# ---------------------------------------------------------------
+
+# Datasets (CIFAR-10 is downloaded at runtime into a mounted volume)
+data/
+*.tar.gz
+cifar-10-batches-py/
+
+# Model checkpoints and training artefacts
+checkpoints/
+*.pt
+*.pth
+*.onnx
+runs/
+logs/
+*.jsonl
+
+# Secrets — never commit real values, only .env.example
+.env
+.env.*
+!.env.example
+*secret*.yaml
+!k8s/secret.example.yaml
+kubeconfig
+*.kubeconfig
+
+# macOS
+.DS_Store
+
+# Local scratch
+scratch/
+test_image.png

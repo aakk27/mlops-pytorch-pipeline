@@ -1,0 +1,36 @@
+# Keep the Docker build context small and reproducible.
+# A slim context means faster builds and no accidental secret leakage.
+
+.git
+.github
+.gitignore
+.dockerignore
+
+# Never ship data or checkpoints into an image — they come from volumes
+data/
+checkpoints/
+*.pt
+*.pth
+*.onnx
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.kubeconfig
+
+# Local tooling / caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Docs and manifests are not needed at image build time
+README.md
+docs/
+k8s/
+scratch/
+.DS_Store

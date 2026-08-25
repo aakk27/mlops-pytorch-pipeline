@@ -1,0 +1,19 @@
+[project]
+name = "mlops-pytorch-pipeline"
+version = "0.1.0"
+description = "PyTorch image classification pipeline containerised with Docker and orchestrated on Kubernetes"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["B008"]  # FastAPI uses function calls (File(...), Depends(...)) as defaults
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-ra"

@@ -1,0 +1,104 @@
+name: CI
+
+# Runs on every pull request into develop/main, and can be triggered by hand.
+# Kept off plain pushes so scaffolding commits do not produce noisy red builds.
+on:
+  pull_request:
+    branches: [develop, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff==0.6.9
+
+      - name: Ruff check
+        run: ruff check src tests
+
+      - name: Ruff format check
+        run: ruff format --check src tests
+
+  test:
+    name: Unit tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip wheels
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements/*.txt') }}
+
+      - name: Install training dependencies (CPU-only torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu \
+                      --extra-index-url https://pypi.org/simple \
+                      -r requirements/train.txt
+          pip install pytest==8.3.3
+
+      - name: Run tests
+        run: pytest tests -v
+
+  docker-build:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Dockerfiles land in a later PR; skip cleanly until they exist
+      # so early pull requests do not fail on a job that cannot run yet.
+      - name: Detect Dockerfiles
+        id: detect
+        run: |
+          if [ -f docker/Dockerfile.train ] && [ -f docker/Dockerfile.serve ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Dockerfiles not present yet - skipping image build."
+          fi
+
+      - name: Set up Buildx
+        if: steps.detect.outputs.present == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build training image
+        if: steps.detect.outputs.present == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.train
+          push: false
+          tags: mlops-train:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build serving image
+        if: steps.detect.outputs.present == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.serve
+          push: false
+          tags: mlops-serve:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
