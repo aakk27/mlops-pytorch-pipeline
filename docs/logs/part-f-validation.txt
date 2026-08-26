@@ -1,0 +1,199 @@
+Part F end-to-end validation
+Date: 2026-08-26 03:32:18Z
+==================================================================
+
+## 0. Cluster and images
+
+$ kubectl get nodes
+NAME       STATUS   ROLES           AGE   VERSION
+minikube   Ready    control-plane   17h   v1.35.1
+
+$ kubectl version --client=false -o yaml | head -20
+clientVersion:
+  buildDate: "2026-08-20T03:06:27Z"
+  compiler: gc
+  gitCommit: bb826b1d48562f110659e64e8ec444327433db95
+  gitTreeState: clean
+  gitVersion: v1.36.4
+  goVersion: go1.26.7
+  major: "1"
+  minor: "36"
+  platform: darwin/arm64
+kustomizeVersion: v5.8.1
+serverVersion:
+  buildDate: "2026-02-10T12:53:14Z"
+  compiler: gc
+  emulationMajor: "1"
+  emulationMinor: "35"
+  gitCommit: 8fea90b45245ef5c8ba54e7ae044d3e777c22500
+  gitTreeState: clean
+  gitVersion: v1.35.1
+  goVersion: go1.25.6
+
+Building images inside minikube's Docker daemon...
+
+$ docker build -q -f docker/Dockerfile.train -t mlops-train:v1 .
+sha256:6bfed66a1d4e30b718414544bf176d8a6c7ec357b3f5bc376c20537e21b45eca
+
+$ docker build -q -f docker/Dockerfile.serve -t mlops-serve:v1 .
+sha256:c463939d8e1f52659cd4e8c26bc5734a5333df543ff73cb45dd3d8fe19cddfcb
+
+$ docker images --format '{{.Repository}}:{{.Tag}}' | grep mlops
+mlops-serve:v1
+mlops-train:v1
+
+## 1. Apply namespace, config, storage and the training Job
+
+$ kubectl apply -f k8s/namespace.yaml
+namespace/ml-training unchanged
+
+$ kubectl apply -f k8s/configmap.yaml
+configmap/training-config unchanged
+
+$ kubectl apply -f k8s/pvc.yaml
+persistentvolumeclaim/dataset-pvc unchanged
+persistentvolumeclaim/checkpoint-pvc unchanged
+
+$ kubectl apply -f k8s/training-job.yaml
+job.batch/model-training created
+
+$ kubectl get pvc -n ml-training
+NAME             STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE
+checkpoint-pvc   Bound    pvc-73785a07-3e84-4301-a7c8-ffc210c6b937   1Gi        RWO            standard       <unset>                 43m
+dataset-pvc      Bound    pvc-ea46f925-17b8-4437-9661-1990efcbb3f5   2Gi        RWO            standard       <unset>                 43m
+
+Waiting for the training Job (up to 20 minutes)...
+job.batch/model-training condition met
+Job completed.
+
+$ kubectl get job/model-training -n ml-training
+NAME             STATUS     COMPLETIONS   DURATION   AGE
+model-training   Complete   1/1           8m42s      8m42s
+
+### Training logs
+
+$ kubectl logs job/model-training -n ml-training
+{"event": "env_overrides_applied", "overrides": {"MAX_EPOCHS": 2, "NUM_WORKERS": 2, "SUBSET_FRACTION": 0.05}}
+{"event": "run_started", "config_path": "/app/configs/training_config.yaml", "device": "cpu", "architecture": "resnet18", "num_classes": 10, "trainable_parameters": 11173962, "epochs": 2, "batch_size": 64, "learning_rate": 0.001, "subset_fraction": 0.05}
+{"event": "data_ready", "train_batches": 40, "val_batches": 8, "train_examples": 2500, "val_examples": 500, "data_seconds": 1.4}
+{"epoch": 1, "train_loss": 2.0292, "train_accuracy": 0.2632, "val_loss": 1.9178, "val_accuracy": 0.296, "epoch_seconds": 258.8}
+{"event": "checkpoint_saved", "path": "/app/checkpoints/classifier_v1.pt", "epoch": 1}
+{"epoch": 2, "train_loss": 1.7498, "train_accuracy": 0.3384, "val_loss": 2.3598, "val_accuracy": 0.256, "epoch_seconds": 257.2}
+{"event": "no_improvement", "epoch": 2, "patience_counter": 1}
+{"event": "training_complete", "best_val_loss": 1.9178, "best_val_accuracy": 0.296, "checkpoint": "/app/checkpoints/classifier_v1.pt", "training_seconds": 516.1, "data_seconds": 1.4, "total_seconds": 517.6}
+
+## 2. Deploy the serving layer
+
+$ kubectl apply -f k8s/serving-deployment.yaml
+deployment.apps/model-serving unchanged
+
+$ kubectl apply -f k8s/serving-service.yaml
+service/model-serving unchanged
+
+$ kubectl apply -f k8s/hpa.yaml
+horizontalpodautoscaler.autoscaling/model-serving unchanged
+
+Waiting for rollout...
+
+$ kubectl rollout status deployment/model-serving -n ml-training --timeout=300s
+deployment "model-serving" successfully rolled out
+
+## 3. Verify pods are running and healthy
+
+$ kubectl get pods -n ml-training -o wide
+NAME                            READY   STATUS      RESTARTS   AGE     IP            NODE       NOMINATED NODE   READINESS GATES
+model-serving-b6b78767f-8fgpf   1/1     Running     0          8m33s   10.244.0.11   minikube   <none>           <none>
+model-serving-b6b78767f-f2th9   1/1     Running     0          8m48s   10.244.0.9    minikube   <none>           <none>
+model-training-vjkwn            0/1     Completed   0          8m42s   10.244.0.10   minikube   <none>           <none>
+
+$ kubectl get svc,hpa -n ml-training
+NAME                    TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+service/model-serving   ClusterIP   10.96.208.247   <none>        80/TCP    31m
+
+NAME                                                REFERENCE                  TARGETS                        MINPODS   MAXPODS   REPLICAS   AGE
+horizontalpodautoscaler.autoscaling/model-serving   Deployment/model-serving   cpu: 0%/70%, memory: 43%/80%   2         5         2          31m
+
+$ kubectl describe deployment model-serving -n ml-training
+Name:                   model-serving
+Namespace:              ml-training
+CreationTimestamp:      Wed, 26 Aug 2026 08:39:19 +0530
+Labels:                 app=model-serving
+                        project=mlops-pytorch-pipeline
+Annotations:            deployment.kubernetes.io/revision: 3
+Selector:               app=model-serving
+Replicas:               2 desired | 2 updated | 2 total | 2 available | 0 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  0 max unavailable, 1 max surge
+Pod Template:
+  Labels:  app=model-serving
+  Containers:
+   server:
+    Image:      mlops-serve:v1
+    Port:       8080/TCP (http)
+    Host Port:  0/TCP (http)
+    Limits:
+      cpu:     1
+      memory:  2Gi
+    Requests:
+      cpu:      500m
+      memory:   1Gi
+    Liveness:   http-get http://:http/health delay=0s timeout=1s period=10s #success=1 #failure=3
+    Readiness:  http-get http://:http/health delay=15s timeout=1s period=5s #success=1 #failure=3
+    Startup:    http-get http://:http/health delay=0s timeout=1s period=10s #success=1 #failure=270
+    Environment:
+      MODEL_CHECKPOINT_PATH:  /app/checkpoints/classifier_v1.pt
+    Mounts:
+      /app/checkpoints from checkpoints (ro)
+  Volumes:
+   checkpoints:
+    Type:          PersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)
+    ClaimName:     checkpoint-pvc
+    ReadOnly:      true
+  Node-Selectors:  <none>
+  Tolerations:     <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Available      True    MinimumReplicasAvailable
+  Progressing    True    NewReplicaSetAvailable
+OldReplicaSets:  model-serving-5bd87fbdd7 (0/0 replicas created), model-serving-676cfc9865 (0/0 replicas created)
+NewReplicaSet:   model-serving-b6b78767f (2/2 replicas created)
+Events:
+  Type    Reason             Age    From                   Message
+  ----    ------             ----   ----                   -------
+  Normal  ScalingReplicaSet  31m    deployment-controller  Scaled up replica set model-serving-5bd87fbdd7 from 0 to 2
+  Normal  ScalingReplicaSet  27m    deployment-controller  Scaled up replica set model-serving-676cfc9865 from 0 to 1
+  Normal  ScalingReplicaSet  14m    deployment-controller  Scaled down replica set model-serving-5bd87fbdd7 from 2 to 1
+  Normal  ScalingReplicaSet  14m    deployment-controller  Scaled up replica set model-serving-676cfc9865 from 1 to 2
+  Normal  ScalingReplicaSet  13m    deployment-controller  Scaled down replica set model-serving-5bd87fbdd7 from 1 to 0
+  Normal  ScalingReplicaSet  8m48s  deployment-controller  Scaled up replica set model-serving-b6b78767f from 0 to 1
+  Normal  ScalingReplicaSet  8m33s  deployment-controller  Scaled down replica set model-serving-676cfc9865 from 2 to 1
+  Normal  ScalingReplicaSet  8m33s  deployment-controller  Scaled up replica set model-serving-b6b78767f from 1 to 2
+  Normal  ScalingReplicaSet  8m16s  deployment-controller  Scaled down replica set model-serving-676cfc9865 from 1 to 0
+
+## 4. Prediction through the Service
+
+$ curl -s http://localhost:8080/health
+{"status":"ok","model_loaded":true}
+$ curl -s http://localhost:8080/metadata
+{"class_names":["airplane","automobile","bird","cat","deer","dog","frog","horse","ship","truck"],"architecture":"resnet18","num_classes":10,"checkpoint_path":"/app/checkpoints/classifier_v1.pt","trained_epochs":1,"val_loss":1.9177873344421388,"val_accuracy":0.296}
+$ curl -s -X POST http://localhost:8080/predict -F "image=@test_image.png"
+{"filename":"test_image.png","predicted_class":"cat","confidence":0.2227,"probabilities":{"airplane":0.0774,"automobile":0.0124,"bird":0.1779,"cat":0.2227,"deer":0.2091,"dog":0.1492,"frog":0.0588,"horse":0.0076,"ship":0.0724,"truck":0.0125}}
+(second request, to show both replicas serve)
+
+$ curl -s -X POST http://localhost:8080/predict -F "image=@test_image.png"
+{"filename":"test_image.png","predicted_class":"cat","confidence":0.2227,"probabilities":{"airplane":0.0774,"automobile":0.0124,"bird":0.1779,"cat":0.2227,"deer":0.2091,"dog":0.1492,"frog":0.0588,"horse":0.0076,"ship":0.0724,"truck":0.0125}}
+## 5. HPA status
+
+$ kubectl get hpa model-serving -n ml-training
+NAME            REFERENCE                  TARGETS                        MINPODS   MAXPODS   REPLICAS   AGE
+model-serving   Deployment/model-serving   cpu: 0%/70%, memory: 43%/80%   2         5         2          31m
+
+$ kubectl top pods -n ml-training
+NAME                            CPU(cores)   MEMORY(bytes)   
+model-serving-b6b78767f-8fgpf   2m           449Mi           
+model-serving-b6b78767f-f2th9   2m           449Mi           
+
+==================================================================
+Capture complete

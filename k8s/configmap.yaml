@@ -1,0 +1,36 @@
+# Training configuration, mounted as a volume at /app/configs by the Job.
+#
+# This is the single source of hyperparameters inside the cluster. The values
+# match configs/training_config.yaml in the repository; per-run adjustments are
+# made with environment variables in the Job spec rather than by editing here,
+# so this file stays the declared baseline.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: training-config
+  namespace: ml-training
+  labels:
+    app: model-training
+    project: mlops-pytorch-pipeline
+data:
+  training_config.yaml: |
+    model:
+      architecture: resnet18
+      num_classes: 10
+
+    training:
+      epochs: 10
+      batch_size: 64
+      learning_rate: 0.001
+      early_stopping_patience: 3
+      num_workers: 2
+      seed: 42
+
+    data:
+      dataset: cifar10
+      data_dir: /app/data
+      subset_fraction: 1.0
+
+    output:
+      checkpoint_dir: /app/checkpoints
+      model_name: classifier_v1.pt

@@ -1,0 +1,14 @@
+# Inference-only dependencies — all versions pinned.
+# Deliberately excludes training-only libraries (tensorboard, tqdm, matplotlib):
+# the serving image ships nothing it does not need at request time.
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+
+torch==2.13.0
+torchvision==0.28.0
+numpy==2.4.6
+PyYAML==6.0.3
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32
+pillow==12.3.0

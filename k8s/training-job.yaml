@@ -1,0 +1,124 @@
+# Training Job.
+#
+# Runs the training image to completion, reading hyperparameters from the
+# ConfigMap and writing its checkpoint to the shared PVC that the serving
+# Deployment mounts read-only.
+#
+# The demonstration overrides (SUBSET_FRACTION, MAX_EPOCHS) keep a cluster run
+# short. The container is CPU-bound — Docker on macOS has no Metal access — and
+# the 2 CPU limit below is enforced, so an epoch on 5% of CIFAR-10 measured 258
+# seconds here against 52 seconds for the same image under `docker run` with the
+# whole Docker VM available. Measured Job duration: 8m42s with the dataset PVC
+# already populated.
+#
+# Budget for the first run on an empty dataset PVC: CIFAR-10 downloads before
+# the first epoch, measured at 33 minutes (data_seconds 1992.6). Later runs read
+# it from the volume in about a second. The serving Deployment's startupProbe is
+# sized to cover that window — see D-023.
+#
+# The ConfigMap itself keeps the full 10-epoch values, so removing these two
+# environment variables runs the real thing without editing anything else.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: model-training
+  namespace: ml-training
+  labels:
+    app: model-training
+    project: mlops-pytorch-pipeline
+spec:
+  # A failed pod is retried twice before the Job is marked failed.
+  backoffLimit: 2
+  # Clean the Job up an hour after it finishes, so repeated demonstrations do
+  # not accumulate completed pods. Comment out to inspect a run afterwards.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: model-training
+    spec:
+      # A Job must not restart its pod on success; OnFailure would re-run
+      # training in place rather than letting backoffLimit govern retries.
+      restartPolicy: Never
+      containers:
+        - name: trainer
+          image: mlops-train:v1
+          # The image is built directly into minikube's Docker daemon via
+          # `eval $(minikube docker-env)`, so there is no registry to pull from.
+          # Without IfNotPresent the kubelet would try Docker Hub and fail with
+          # ImagePullBackOff.
+          imagePullPolicy: IfNotPresent
+          env:
+            # Points at the ConfigMap mount rather than the copy baked into the
+            # image, so cluster configuration wins over image defaults.
+            - name: TRAINING_CONFIG_PATH
+              value: /app/configs/training_config.yaml
+            # Demonstration sizing — remove both for a full 10-epoch run.
+            - name: SUBSET_FRACTION
+              value: "0.05"
+            - name: MAX_EPOCHS
+              value: "2"
+            - name: NUM_WORKERS
+              value: "2"
+          volumeMounts:
+            - name: training-config
+              mountPath: /app/configs
+              readOnly: true
+            - name: dataset
+              mountPath: /app/data
+            - name: checkpoints
+              mountPath: /app/checkpoints
+          resources:
+            requests:
+              cpu: "2"
+              memory: 4Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          # Training writes to two mounted volumes. The default StorageClass on
+          # minikube provisions hostPath directories owned by root, so the
+          # container runs as root here rather than fight volume ownership.
+          # The serving container, which only reads, runs unprivileged.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: training-config
+          configMap:
+            name: training-config
+        - name: dataset
+          persistentVolumeClaim:
+            claimName: dataset-pvc
+        - name: checkpoints
+          persistentVolumeClaim:
+            claimName: checkpoint-pvc
+
+# ---------------------------------------------------------------------------
+# GPU variant (assignment bonus)
+# ---------------------------------------------------------------------------
+# Scheduling this Job onto a GPU node requires three additions to the pod spec
+# above. They are left commented because this cluster is a single-node minikube
+# on Apple Silicon: there is no nvidia.com/gpu resource to request, and enabling
+# them would leave the Job Pending forever with "0/1 nodes are available:
+# 1 Insufficient nvidia.com/gpu".
+#
+#   resources:
+#     limits:
+#       nvidia.com/gpu: 1          # count, not a fraction; also the request
+#
+#   nodeSelector:
+#     accelerator: nvidia-tesla-t4 # match however GPU nodes are labelled
+#
+#   tolerations:                   # GPU pools are usually tainted so that
+#     - key: nvidia.com/gpu        # non-GPU work does not occupy them
+#       operator: Exists
+#       effect: NoSchedule
+#
+# No application change is needed: select_device() in src/train.py already
+# prefers CUDA when torch.cuda.is_available(), so the same image would log
+# "device": "cuda" on a GPU node. The image would need CUDA-enabled torch
+# wheels rather than the CPU-only index pinned in requirements/train.txt.
+#
+# This block is written from the Kubernetes device-plugin model but has not
+# been executed — no NVIDIA hardware was available to test it.

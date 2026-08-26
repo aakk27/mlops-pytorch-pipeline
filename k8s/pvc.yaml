@@ -1,0 +1,38 @@
+# Two PersistentVolumeClaims, deliberately separate.
+#
+# The dataset claim survives Job re-runs so CIFAR-10 is downloaded once rather
+# than on every attempt. The checkpoint claim is the handover point between the
+# training Job (which writes it) and the serving Deployment (which mounts it
+# read-only).
+#
+# Both are ReadWriteOnce, which on a single-node minikube cluster is sufficient:
+# every pod lands on the same node, so the volume can be attached to all of them.
+# A multi-node cluster would need ReadWriteMany, or an object store, to let the
+# serving replicas read a checkpoint written by a Job on a different node.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dataset-pvc
+  namespace: ml-training
+  labels:
+    project: mlops-pytorch-pipeline
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: checkpoint-pvc
+  namespace: ml-training
+  labels:
+    project: mlops-pytorch-pipeline
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi

@@ -1,0 +1,30 @@
+# Training configuration.
+#
+# In Kubernetes this file is supplied by the `training-config` ConfigMap and
+# mounted at /app/configs/training_config.yaml. Locally it is read straight
+# from the repository. The path can be overridden with TRAINING_CONFIG_PATH.
+#
+# Every value below can also be overridden by an environment variable
+# (see the `env_overrides` notes in src/train.py) which is what makes the short
+# demonstration runs possible without editing this file.
+
+model:
+  architecture: resnet18   # resnet18 | simple_cnn
+  num_classes: 10
+
+training:
+  epochs: 10
+  batch_size: 64
+  learning_rate: 0.001
+  early_stopping_patience: 3
+  num_workers: 2
+  seed: 42
+
+data:
+  dataset: cifar10
+  data_dir: /app/data
+  subset_fraction: 1.0     # 0 < f <= 1.0; use a fraction of the training set
+
+output:
+  checkpoint_dir: /app/checkpoints
+  model_name: classifier_v1.pt
