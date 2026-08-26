@@ -21,6 +21,11 @@ Verified on:
 | Kubernetes | v1.35.1 (minikube) |
 | Python | 3.11 |
 
+> **Paths contain spaces on this machine.** The project lives under
+> `.../MTECH IITM/DA5402W MLOPS/PyTorch ML Workloads with Docker & Kubernet/`.
+> Every shell argument interpolating `$(pwd)` must be quoted or it word-splits.
+> This caused a real failure once — see §7.
+
 ---
 
 ## 2. One-time setup
@@ -114,13 +119,55 @@ PY
 
 ## 4. Docker
 
-*(Stage 2 — commands recorded here once the Dockerfiles land.)*
+### Build
 
 ```bash
-make build-train          # docker build -f docker/Dockerfile.train -t mlops-train:v1 .
-make build-serve          # docker build -f docker/Dockerfile.serve -t mlops-serve:v1 .
-make run-train            # mounts ./data and ./checkpoints
-make run-serve            # publishes :8080
+make build                # both images
+# or explicitly:
+docker build -f docker/Dockerfile.train -t mlops-train:v1 .
+docker build -f docker/Dockerfile.serve -t mlops-serve:v1 .
+```
+
+First build takes 10-20 minutes (torch download); rebuilds after a code-only
+change take seconds, because requirements are installed in an earlier layer.
+
+### Verify the image properties
+
+```bash
+docker images | grep mlops
+docker run --rm mlops-serve:v1 id                                          # non-root
+docker inspect --format='{{json .Config.Healthcheck}}'  mlops-serve:v1
+docker inspect --format='{{json .Config.ExposedPorts}}' mlops-serve:v1
+docker run --rm mlops-serve:v1 ls -la /app/src                             # inference modules only
+```
+
+### Run training in a container
+
+```bash
+docker run --rm \
+  -v "$(pwd)/data:/app/data" \
+  -v "$(pwd)/checkpoints:/app/checkpoints" \
+  -e SUBSET_FRACTION=0.05 -e MAX_EPOCHS=2 -e NUM_WORKERS=2 \
+  mlops-train:v1
+```
+
+Expect `"device": "cpu"` — containers on macOS have no Metal access (D-017), so
+this is roughly 11x slower per epoch than the local MPS run. Around 105 seconds
+for the parameters above.
+
+### Run serving in a container
+
+```bash
+docker run --rm -p 8080:8080 -v "$(pwd)/checkpoints:/app/checkpoints" mlops-serve:v1
+```
+
+In another shell:
+
+```bash
+curl -s localhost:8080/health   | jq
+curl -s localhost:8080/metadata | jq
+docker ps --format '{{.Image}}\t{{.Status}}'     # expect (healthy) after ~35s
+curl -s -X POST localhost:8080/predict -F "image=@test_image.png" | jq
 ```
 
 ---
@@ -206,6 +253,8 @@ Failures actually encountered during this project, and their resolutions.
 | `remote: Invalid username or token. Password authentication is not supported` | GitHub removed password auth for git over HTTPS | `gh auth login` then `gh auth setup-git` |
 | `refusing to allow an OAuth App to create or update workflow .github/workflows/ci.yml without workflow scope` | Token lacks the `workflow` scope | `gh auth refresh -h github.com -s workflow` |
 | `pull request create failed: No commits between develop and feature/x` | The commit never ran — a multi-line heredoc pasted into the shell was swallowed | Verify with `git log --oneline -2`; use `git commit -m ... -m ...` instead of a heredoc |
+| `docker: invalid reference format: repository name (DA5402W) must be lowercase` | Unquoted `$(pwd)` word-split on spaces in the project path, so Docker read a path fragment as the image name | Quote every volume argument: `-v "$(pwd)/data:/app/data"`. The Makefile quotes `$(PWD)` for the same reason (D-022) |
+| `ModuleNotFoundError: No module named 'torchvision'` in a working shell | New terminal, virtualenv not active | `source .venv/bin/activate` |
 | `unable to unlink .git/config.lock: Operation not permitted` | Git run against a mount that denies deletes | Run all git commands from a native terminal (D-002) |
 | Training Job stuck `Pending`, `describe` shows `Insufficient cpu/memory` | Node smaller than the Job's 2 CPU / 4Gi request | Restart minikube with `--cpus=4 --memory=7168` |
 | Pod in `ImagePullBackOff` for `mlops-train:v1` | Image built in the host Docker daemon, not minikube's | `eval $(minikube docker-env)` then rebuild; keep `imagePullPolicy: IfNotPresent` |

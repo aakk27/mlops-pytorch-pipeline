@@ -47,15 +47,15 @@ satisfies it, so a reviewer can go straight from a mark to the code.
 
 | # | Requirement | Where satisfied | Status |
 |---|---|---|---|
-| C1 | Multi-stage `docker/Dockerfile.train` | `docker/Dockerfile.train` | Stage 2 |
+| C1 | Multi-stage `docker/Dockerfile.train` | `docker/Dockerfile.train` | Done |
 | C2 | All dependency versions pinned | `requirements/train.txt`, `requirements/serve.txt` | Done |
 | C3 | Training reads config from mounted volume or env var | `TRAINING_CONFIG_PATH`, ConfigMap mount at `/app/configs` | Done |
-| C4 | Serving image based on a slim Python image | `docker/Dockerfile.serve` | Stage 2 |
+| C4 | Serving image based on a slim Python image | `docker/Dockerfile.serve` | Done |
 | C5 | Inference dependencies only, no training libraries | `requirements/serve.txt` | Done |
-| C6 | Exposes port 8080 | `docker/Dockerfile.serve` | Stage 2 |
-| C7 | Runs as a non-root user | `docker/Dockerfile.serve` | Stage 2 |
-| C8 | `HEALTHCHECK` instruction | `docker/Dockerfile.serve` | Stage 2 |
-| C9 | Local build and run verification evidence | `docs/EVIDENCE.md`, PR body | Stage 2 |
+| C6 | Exposes port 8080 | `docker/Dockerfile.serve` | Done — verified |
+| C7 | Runs as a non-root user | `docker/Dockerfile.serve` | Done — `uid=1001(appuser)` |
+| C8 | `HEALTHCHECK` instruction | `docker/Dockerfile.serve` | Done — container reports `(healthy)` |
+| C9 | Local build and run verification evidence | `docs/EVIDENCE.md` Stage 2 | Done |
 
 ### Part D — Kubernetes Training Job (10 points, + 5 bonus)
 
@@ -122,10 +122,10 @@ satisfies it, so a reviewer can go straight from a mark to the code.
 
 | Stage | Branch | PR | Scope | Status |
 |---|---|---|---|---|
-| 0 | `feature/project-scaffold` | #1 | Structure, `.gitignore`, `.dockerignore`, CI, `pyproject.toml`, `.env.example`, `Makefile` | Complete |
-| 1 | `feature/pytorch-model` | #2 | `model.py`, `dataset.py`, `train.py`, `serve.py`, configs, pinned requirements, 22 tests | Complete, awaiting review |
-| 1b | `docs/traceability` | #3 | `docs/PLAN.md`, `DECISIONS.md`, `RUNBOOK.md`, `EVIDENCE.md` | In progress |
-| 2 | `feature/docker-training` | #4 | `Dockerfile.train`, `Dockerfile.serve`, local build/run evidence | Drafted, awaiting build |
+| 0 | `feature/project-scaffold` | #1 | Structure, `.gitignore`, `.dockerignore`, CI, `pyproject.toml`, `.env.example`, `Makefile` | **Merged** |
+| 1 | `feature/pytorch-model` | #2 | `model.py`, `dataset.py`, `train.py`, `serve.py`, configs, pinned requirements, 22 tests | **Merged** |
+| 1b | `docs/traceability` | #3 | `docs/PLAN.md`, `DECISIONS.md`, `RUNBOOK.md`, `EVIDENCE.md` | PR open |
+| 2 | `feature/docker-training` | #4 | `Dockerfile.train`, `Dockerfile.serve`, local build/run evidence | Built and verified, PR open |
 | 3 | `feature/k8s-deployment` | #5 | All `k8s/` manifests including HPA and the GPU bonus block | Pending |
 | 4 | `feature/e2e-validation` | #6 | Cluster run evidence, README, architecture diagram, reflection | Pending |
 | — | `develop` → `main` | #7 | Release PR | Pending |
@@ -161,3 +161,5 @@ rather than a single burst, which matches the brief's "2 PRs per week" intent.
 | CIFAR-10 download slow or unavailable inside the Job | Training Job fails | Dataset PVC persists the download across runs; `subset_fraction` limits the work | Mitigated |
 | GPU bonus cannot be executed | 5 bonus points | Manifest provided and documented as untested on this hardware; stated honestly | Accepted |
 | Full 10-epoch CPU training exceeds the deadline | Schedule | `SUBSET_FRACTION` / `MAX_EPOCHS` env overrides for demonstration runs | Mitigated |
+| No `linux/arm64` CPU wheel for the pinned torch | Docker build fails | PyPI fallback via `--extra-index-url` | Resolved — wheel installed in 65s |
+| Containers are ~11x slower than local MPS | K8s Job demo too slow | Job sized from the measured containerised epoch (~52s), not the local one | Mitigated |

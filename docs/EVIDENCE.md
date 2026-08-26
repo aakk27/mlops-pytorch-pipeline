@@ -255,11 +255,220 @@ parameters are chosen from a measured containerised epoch instead.
 
 ## Stage 2 — Docker
 
-*(To be filled: image builds, sizes, non-root verification, HEALTHCHECK
-inspection, containerised training run, containerised prediction.)*
+### Image builds
+
+Both images built on the first attempt. The dependency install took 65 seconds,
+which confirms the `linux/arm64` CPU wheel resolved from the PyTorch index
+rather than falling back to a CUDA-enabled wheel from PyPI:
 
 ```
+=> [builder 3/5] RUN python -m venv /opt/venv                              1.8s
+=> [builder 4/5] COPY requirements/train.txt ./requirements/train.txt      0.0s
+=> [builder 5/5] RUN pip install --no-cache-dir -r requirements/train.txt 65.4s
+=> [training 3/6] COPY --from=builder /opt/venv /opt/venv                  1.3s
+=> [training 4/6] COPY src/ ./src/                                         0.1s
+=> [training 5/6] COPY configs/ ./configs/                                 0.0s
+=> [training 6/6] RUN mkdir -p /app/data /app/checkpoints                  0.1s
+=> naming to docker.io/library/mlops-train:v1
 ```
+
+The layer ordering is visible here: requirements are copied and installed before
+any source, so editing `src/` re-runs only the last three sub-second steps.
+
+### Image sizes
+
+```
+$ docker images | grep mlops
+mlops-serve:v1   461bb84eb7ee   1.43GB   297MB
+mlops-train:v1   0884567346b7   1.39GB   286MB
+```
+
+The serving image is **larger** than the training image. Both carry `torch` and
+`torchvision`, which dominate; serving adds a web stack on top while training
+adds only `numpy` and `PyYAML`. The requirement — inference dependencies only,
+no training libraries — is satisfied, but the image is not smaller in absolute
+terms. See D-020 for the full reasoning and the options considered.
+
+The second column is the compressed size, which is what actually transfers on a
+pull and therefore what governs pod start-up latency in the cluster.
+
+### C7 — Non-root user
+
+```
+$ docker run --rm mlops-serve:v1 id
+uid=1001(appuser) gid=1001(appgroup) groups=1001(appgroup)
+```
+
+### C8 — HEALTHCHECK declared
+
+```
+$ docker inspect --format='{{json .Config.Healthcheck}}' mlops-serve:v1
+{"Test":["CMD-SHELL","python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4)\" || exit 1"],
+ "Interval":30000000000,"Timeout":5000000000,"StartPeriod":15000000000,"Retries":3}
+```
+
+### C8 — HEALTHCHECK actually passing
+
+Declaring a healthcheck and having it succeed are different claims. After the
+start period elapsed:
+
+```
+$ docker ps --format '{{.Image}}\t{{.Status}}'
+mlops-serve:v1                        Up About a minute (healthy)
+gcr.io/k8s-minikube/kicbase:v0.0.50   Up 3 hours
+```
+
+`(healthy)` confirms the stdlib-`urllib` probe runs inside a slim image with no
+curl installed, reaches `/health`, and gets a 200.
+
+### C6 — Exposed port
+
+```
+$ docker inspect --format='{{json .Config.ExposedPorts}}' mlops-serve:v1
+{"8080/tcp":{}}
+```
+
+### C5 — Training modules absent from the serving image
+
+```
+$ docker run --rm mlops-serve:v1 ls -la /app/src
+total 20
+drwxr-xr-x 1 appuser appgroup 4096 .
+drwxr-xr-x 1 appuser appgroup 4096 ..
+-rw-r--r-- 1 appuser appgroup 3795 model.py
+-rw-r--r-- 1 appuser appgroup 6813 serve.py
+```
+
+Only the two modules inference imports. `train.py` and `dataset.py` are not in
+the image.
+
+### Containerised training run
+
+```
+$ docker run --rm \
+    -v "$(pwd)/data:/app/data" \
+    -v "$(pwd)/checkpoints:/app/checkpoints" \
+    -e SUBSET_FRACTION=0.05 -e MAX_EPOCHS=2 -e NUM_WORKERS=2 \
+    mlops-train:v1
+
+{"event": "env_overrides_applied", "overrides": {"MAX_EPOCHS": 2, "NUM_WORKERS": 2, "SUBSET_FRACTION": 0.05}}
+{"event": "run_started", "config_path": "/app/configs/training_config.yaml", "device": "cpu", "architecture": "resnet18", "num_classes": 10, "trainable_parameters": 11173962, "epochs": 2, "batch_size": 64, "learning_rate": 0.001, "subset_fraction": 0.05}
+{"event": "data_ready", "train_batches": 40, "val_batches": 8, "train_examples": 2500, "val_examples": 500, "data_seconds": 2.0}
+{"epoch": 1, "train_loss": 2.0292, "train_accuracy": 0.2632, "val_loss": 1.9178, "val_accuracy": 0.296, "epoch_seconds": 50.8}
+{"event": "checkpoint_saved", "path": "/app/checkpoints/classifier_v1.pt", "epoch": 1}
+{"epoch": 2, "train_loss": 1.7498, "train_accuracy": 0.3384, "val_loss": 2.3598, "val_accuracy": 0.256, "epoch_seconds": 52.6}
+{"event": "no_improvement", "epoch": 2, "patience_counter": 1}
+{"event": "training_complete", "best_val_loss": 1.9178, "best_val_accuracy": 0.296, "checkpoint": "/app/checkpoints/classifier_v1.pt", "training_seconds": 103.5, "data_seconds": 2.0, "total_seconds": 105.7}
+```
+
+Three things this establishes.
+
+**C3 — configuration resolution inside the container.** `config_path` is
+`/app/configs/training_config.yaml`, the baked-in copy. In Kubernetes the
+ConfigMap mounts over exactly that path, which is the mechanism Part D relies
+on. The environment overrides were applied on top, as logged.
+
+**B6 — early stopping demonstrated on real data.** Epoch 2's validation loss
+*regressed* (1.9178 to 2.3598), so no checkpoint was written and the patience
+counter incremented. `training_complete` reports epoch 1's 1.9178 as the best.
+The checkpoint left on disk is therefore the better model, not the most recent
+one — which is the entire point of the mechanism. Earlier runs had only ever
+improved, so this is the first time the branch was exercised outside the tests.
+
+**D-017 confirmed by measurement.** The container reports `device: cpu`, as
+predicted: Docker on macOS runs in a Linux VM with no Metal access.
+
+| Environment | Device | epoch_seconds | Ratio |
+|---|---|---:|---:|
+| Local virtualenv | mps | ~4.7 | 1x |
+| Container | cpu | ~52 | ~11x |
+
+This 11x factor — not the local MPS figure — is what sizes the Kubernetes Job.
+At 2 CPUs the Job will be slower still, so `SUBSET_FRACTION=0.05, MAX_EPOCHS=2`
+should land around three to four minutes.
+
+**On the small metric differences.** The containerised `train_loss` of 2.0292
+differs from the local 2.0321. This is `NUM_WORKERS=2` versus `0`, not
+nondeterminism — see D-021.
+
+### Serving the containerised checkpoint
+
+A *separate* container, sharing only the checkpoint volume:
+
+```
+$ docker run --rm -p 8080:8080 -v "$(pwd)/checkpoints:/app/checkpoints" mlops-serve:v1
+
+$ curl -s localhost:8080/health | jq
+{
+  "status": "ok",
+  "model_loaded": true
+}
+
+$ curl -s localhost:8080/metadata | jq
+{
+  "class_names": ["airplane","automobile","bird","cat","deer","dog","frog","horse","ship","truck"],
+  "architecture": "resnet18",
+  "num_classes": 10,
+  "checkpoint_path": "/app/checkpoints/classifier_v1.pt",
+  "trained_epochs": 1,
+  "val_loss": 1.9177873344421388,
+  "val_accuracy": 0.296
+}
+```
+
+`trained_epochs: 1` is the important field. The serving container independently
+reports the epoch-1 weights — the ones early stopping preserved when epoch 2
+regressed. Two separate containers agree on which model won, communicating only
+through the shared volume.
+
+`architecture` and `class_names` came out of the checkpoint, not from any
+configuration the serving image reads. That is D-007 working: `serve.py` was
+never told what to rebuild.
+
+### Prediction
+
+```
+$ python -c "...save CIFAR-10 test image 0 resized to 128x128..."
+true label: cat
+
+$ curl -s -X POST localhost:8080/predict -F "image=@test_image.png" | jq
+{
+  "filename": "test_image.png",
+  "predicted_class": "cat",
+  "confidence": 0.2227,
+  "probabilities": {
+    "airplane": 0.0774, "automobile": 0.0124, "bird": 0.1779, "cat": 0.2227,
+    "deer": 0.2091,     "dog": 0.1492,        "frog": 0.0588, "horse": 0.0076,
+    "ship": 0.0724,     "truck": 0.0125
+  }
+}
+```
+
+Correct — predicted `cat`, true label `cat`. The probabilities sum to exactly
+1.0000.
+
+The confidence of 0.2227 is low, with `deer` (0.2091) and `bird` (0.1779) close
+behind. That is the appropriate shape for a model trained on 5% of CIFAR-10 for
+two epochs at 29.6% validation accuracy: right on this example, but genuinely
+uncertain. A 2-epoch model returning 0.99 confidence would indicate something
+wrong with the softmax or the preprocessing.
+
+The upload was 128x128 while the model takes 32x32, so this also exercises the
+resize path in `PREPROCESS`.
+
+### Part C requirement coverage
+
+| Req | Claim | Evidence |
+|---|---|---|
+| C1 | Multi-stage training Dockerfile | Build log: `builder` then `training` stage |
+| C2 | Dependency versions pinned | `requirements/*.txt`; 65s install |
+| C3 | Config from mounted volume or env | `config_path: /app/configs/...` plus applied overrides |
+| C4 | Slim Python base | `python:3.11-slim` in both stages |
+| C5 | Inference dependencies only | `/app/src` holds only `model.py`, `serve.py` |
+| C6 | Port 8080 exposed | `{"8080/tcp":{}}` |
+| C7 | Non-root user | `uid=1001(appuser)` |
+| C8 | HEALTHCHECK | Declared, and container reports `(healthy)` |
+| C9 | Local build/run verification | Full chain: build, train, checkpoint, serve, predict |
 
 ---
 

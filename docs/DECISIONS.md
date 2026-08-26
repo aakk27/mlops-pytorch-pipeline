@@ -361,3 +361,106 @@ means CUDA. MPS does not support it, and on CPU there is no transfer to
 accelerate — so on the two devices this project actually runs on, the flag
 bought nothing and emitted a warning. Warnings that are always present train a
 reader to ignore warnings.
+
+---
+
+## D-020 — The serving image is larger than the training image, and that is accepted
+
+**Date:** 2026-08-25 · **Status:** Accepted
+
+**Context.** Measured after the first successful builds:
+
+```
+mlops-serve:v1   1.43GB
+mlops-train:v1   1.39GB
+```
+
+The serving image is ~40MB *larger*, which contradicts the intuition that an
+inference image should be the leaner of the two.
+
+**Why it happens.** Both images need `torch` and `torchvision`, which together
+account for the overwhelming majority of both. `train.txt` then adds only
+`numpy` and `PyYAML`. `serve.txt` adds `fastapi`, `uvicorn[standard]`,
+`python-multipart` and `pillow`. The serving image is the same PyTorch runtime
+plus a web stack, so it is necessarily bigger.
+
+**What the requirement actually asks.** Part C specifies "installs only
+inference dependencies (no training libraries like tensorboard)". That is
+satisfied, and more strongly than the requirement demands: beyond excluding
+training-only packages, the image copies only `serve.py` and `model.py`, so
+`train.py` and `dataset.py` are not present at all. Verified:
+
+```
+$ docker run --rm mlops-serve:v1 ls -la /app/src
+-rw-r--r-- 1 appuser appgroup 3795 model.py
+-rw-r--r-- 1 appuser appgroup 6813 serve.py
+```
+
+**Decision.** Accept the size and document it, rather than pursue a smaller
+number.
+
+**Why not shrink it.** Two options were considered:
+
+1. *Drop `torchvision` from serving.* It is used only for `transforms.Resize`,
+   `ToTensor` and `Normalize`, all replaceable with PIL plus a few tensor
+   operations. Saves perhaps 100–200MB against a 1.4GB image, costs an hour and
+   requires new tests to prove the hand-rolled preprocessing matches the
+   training-time transforms exactly. A preprocessing mismatch degrades accuracy
+   silently, which is a poor trade for 10% of the image size.
+2. *Export to ONNX or TorchScript and drop PyTorch entirely.* This is the only
+   change that would move the number meaningfully, since torch sets a ~1.3GB
+   floor. It is also a different serving architecture than the assignment asks
+   for.
+
+**Honest summary for review.** The serving image excludes every training
+dependency and every training module, but it is not smaller in absolute terms,
+because the PyTorch runtime dominates both. A documented and understood
+limitation is worth more than an unexplained number.
+
+---
+
+## D-021 — Reproducibility holds for a fixed worker count, not across worker counts
+
+**Date:** 2026-08-25 · **Status:** Accepted
+
+**Context.** Two local runs with `NUM_WORKERS=0` produced byte-identical
+metrics (`train_loss` 2.0321 in both), confirming the seeding works. The
+containerised run with `NUM_WORKERS=2` produced slightly different numbers
+(`train_loss` 2.0292).
+
+**Explanation.** This is not nondeterminism. When `num_workers > 0`, each
+DataLoader worker process derives its own RNG stream from the base seed, so the
+sequence of random crops and horizontal flips differs from the single-process
+case. Same seed, different parallelism, different augmentation order.
+
+**Decision.** State the reproducibility claim precisely: runs are reproducible
+for a fixed `(seed, num_workers)` pair. Do not claim reproducibility across
+worker counts, and do not attempt to force it by seeding workers identically —
+that would make every worker apply the *same* augmentations, defeating the point
+of augmenting at all.
+
+**Recorded because** a reviewer comparing the local and containerised logs will
+see the discrepancy. Explaining it is far better than leaving them to conclude
+the seeding is broken.
+
+---
+
+## D-022 — Quote every interpolated path
+
+**Date:** 2026-08-25 · **Status:** Accepted
+
+**Context.** The project lives at
+`.../MTECH IITM/DA5402W MLOPS/PyTorch ML Workloads with Docker & Kubernet/...`.
+An unquoted `$(pwd)` in a `docker run -v` argument word-split on those spaces,
+and Docker read a path fragment as the image name:
+
+```
+docker: invalid reference format: repository name (DA5402W) must be lowercase
+```
+
+**Decision.** Quote every shell argument that interpolates a path. The
+`Makefile` targets were carrying the same latent bug and now quote `$(PWD)`.
+
+**Why it is worth an entry.** The error message names a repository, so it reads
+as a Docker tagging problem rather than a shell quoting one. Recording the
+symptom next to the real cause saves the next diagnosis.
