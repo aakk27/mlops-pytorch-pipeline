@@ -27,13 +27,13 @@ build: build-train build-serve  ## Build both images
 
 run-train:  ## Run training locally with mounted volumes
 	docker run --rm \
-	  -v $(PWD)/data:/app/data \
-	  -v $(PWD)/checkpoints:/app/checkpoints \
+	  -v "$(PWD)/data:/app/data" \
+	  -v "$(PWD)/checkpoints:/app/checkpoints" \
 	  $(IMAGE_TRAIN)
 
 run-serve:  ## Run the serving container locally on :8080
 	docker run --rm -p 8080:8080 \
-	  -v $(PWD)/checkpoints:/app/checkpoints \
+	  -v "$(PWD)/checkpoints:/app/checkpoints" \
 	  $(IMAGE_SERVE)
 
 k8s-up:  ## Apply namespace, config and training job

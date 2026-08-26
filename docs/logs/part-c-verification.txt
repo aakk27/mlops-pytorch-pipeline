@@ -1,0 +1,205 @@
+Part C verification capture
+Host: Darwin 25.5.0 arm64
+Docker: Docker version 29.5.3, build d1c06ef
+Date: 2026-08-26 02:03:29Z
+==================================================================
+
+## 1. Build both images
+
+$ docker build -f docker/Dockerfile.train -t mlops-train:v1 .
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile.train
+#1 transferring dockerfile: 2.81kB done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1.7
+#2 DONE 1.8s
+
+#3 docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#3 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e done
+#3 CACHED
+
+#4 [internal] load metadata for docker.io/library/python:3.11-slim
+#4 DONE 1.4s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 570B done
+#5 DONE 0.0s
+
+#6 [builder 1/5] FROM docker.io/library/python:3.11-slim@sha256:be1575ed968de893bd54f4c56315ff7c4736ce522c1bca08fd521731aafc0d76
+#6 resolve docker.io/library/python:3.11-slim@sha256:be1575ed968de893bd54f4c56315ff7c4736ce522c1bca08fd521731aafc0d76 done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 37.46kB done
+#7 DONE 0.0s
+
+#8 [builder 2/5] WORKDIR /app
+#8 CACHED
+
+#9 [training 4/6] COPY src/ ./src/
+#9 CACHED
+
+#10 [builder 3/5] RUN python -m venv /opt/venv
+#10 CACHED
+
+#11 [builder 4/5] COPY requirements/train.txt ./requirements/train.txt
+#11 CACHED
+
+#12 [training 3/6] COPY --from=builder /opt/venv /opt/venv
+#12 CACHED
+
+#13 [training 5/6] COPY configs/ ./configs/
+#13 CACHED
+
+#14 [builder 5/5] RUN pip install --no-cache-dir -r requirements/train.txt
+#14 CACHED
+
+#15 [training 6/6] RUN mkdir -p /app/data /app/checkpoints
+#15 CACHED
+
+#16 exporting to image
+#16 exporting layers done
+#16 exporting manifest sha256:517fba579d4d4372333028cda7efcb61c520f067f6074e8cf38d50280934ecc5 done
+#16 exporting config sha256:1385b5baf9da06b41bf0dbda9b84eb029980c96ec62739887564185ba179e547 done
+#16 exporting attestation manifest sha256:7c4c46ae2c24a220f3a982547a69123535e8dd829c0f2ca5c1c4e88f60b475ab done
+#16 exporting manifest list sha256:154166de05a4edec6a13736f5e12f2ae6f84048114bb30a94d07418798f8f80b done
+#16 naming to docker.io/library/mlops-train:v1 done
+#16 unpacking to docker.io/library/mlops-train:v1 done
+#16 DONE 0.0s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/34yhcj8jo6f4vo3injmfzzp3n
+
+$ docker build -f docker/Dockerfile.serve -t mlops-serve:v1 .
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile.serve
+#1 transferring dockerfile: 2.91kB done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1.7
+#2 DONE 0.4s
+
+#3 docker-image://docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+#3 resolve docker.io/docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e 0.0s done
+#3 CACHED
+
+#4 [internal] load metadata for docker.io/library/python:3.11-slim
+#4 DONE 0.3s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 570B done
+#5 DONE 0.0s
+
+#6 [builder 1/5] FROM docker.io/library/python:3.11-slim@sha256:be1575ed968de893bd54f4c56315ff7c4736ce522c1bca08fd521731aafc0d76
+#6 resolve docker.io/library/python:3.11-slim@sha256:be1575ed968de893bd54f4c56315ff7c4736ce522c1bca08fd521731aafc0d76 done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 614B done
+#7 DONE 0.0s
+
+#8 [builder 3/5] RUN python -m venv /opt/venv
+#8 CACHED
+
+#9 [builder 5/5] RUN pip install --no-cache-dir -r requirements/serve.txt
+#9 CACHED
+
+#10 [builder 2/5] WORKDIR /app
+#10 CACHED
+
+#11 [serving 3/6] WORKDIR /app
+#11 CACHED
+
+#12 [builder 4/5] COPY requirements/serve.txt ./requirements/serve.txt
+#12 CACHED
+
+#13 [serving 4/6] COPY --from=builder /opt/venv /opt/venv
+#13 CACHED
+
+#14 [serving 5/6] COPY src/serve.py src/model.py ./src/
+#14 CACHED
+
+#15 [serving 2/6] RUN groupadd --gid 1001 appgroup  && useradd --uid 1001 --gid appgroup --create-home --shell /usr/sbin/nologin appuser
+#15 CACHED
+
+#16 [serving 6/6] RUN mkdir -p /app/checkpoints  && chown -R appuser:appgroup /app
+#16 CACHED
+
+#17 exporting to image
+#17 exporting layers done
+#17 exporting manifest sha256:46c92acadd42527e0104fe5b24970807e35c3bbdc54e03c657cfd457128cb67d done
+#17 exporting config sha256:c57741ff9b102cbb600ced218d05f8c3357405fa16f2143ea189a55de943debd done
+#17 exporting attestation manifest sha256:656b8a48cd1b430ca68acd139f4463ccf3f898add8d482a28c25054ef3138497 done
+#17 exporting manifest list sha256:e1cba3918405ff5a2e85e8641561aa0a3f0caa30d5db9adefe4d240730a411ba done
+#17 naming to docker.io/library/mlops-serve:v1 done
+#17 unpacking to docker.io/library/mlops-serve:v1 done
+#17 DONE 0.0s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/sfcmyy3m8wwsyrq9yavpfb1mz
+
+## 2. Image properties
+
+$ docker images --format '{{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}' | grep mlops
+mlops-serve:v1	e1cba3918405	1.43GB
+mlops-train:v1	154166de05a4	1.39GB
+
+$ docker run --rm mlops-serve:v1 id
+uid=1001(appuser) gid=1001(appgroup) groups=1001(appgroup)
+
+$ docker inspect --format='{{json .Config.Healthcheck}}' mlops-serve:v1
+{"Test":["CMD-SHELL","python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=4)\" || exit 1"],"Interval":30000000000,"Timeout":5000000000,"StartPeriod":15000000000,"Retries":3}
+
+$ docker inspect --format='{{json .Config.ExposedPorts}}' mlops-serve:v1
+{"8080/tcp":{}}
+
+$ docker inspect --format='{{.Config.User}}' mlops-serve:v1
+appuser
+
+$ docker run --rm mlops-serve:v1 ls -la /app/src
+total 20
+drwxr-xr-x 1 appuser appgroup 4096 Aug 25 13:03 .
+drwxr-xr-x 1 appuser appgroup 4096 Aug 25 13:03 ..
+-rw-r--r-- 1 appuser appgroup 3795 Aug 25 12:49 model.py
+-rw-r--r-- 1 appuser appgroup 6813 Aug 25 12:49 serve.py
+
+## 3. Training container with mounted volumes
+
+$ docker run --rm -v "$(pwd)/data:/app/data" -v "$(pwd)/checkpoints:/app/checkpoints" -e SUBSET_FRACTION=0.05 -e MAX_EPOCHS=2 -e NUM_WORKERS=2 mlops-train:v1
+{"event": "env_overrides_applied", "overrides": {"MAX_EPOCHS": 2, "NUM_WORKERS": 2, "SUBSET_FRACTION": 0.05}}
+{"event": "run_started", "config_path": "/app/configs/training_config.yaml", "device": "cpu", "architecture": "resnet18", "num_classes": 10, "trainable_parameters": 11173962, "epochs": 2, "batch_size": 64, "learning_rate": 0.001, "subset_fraction": 0.05}
+{"event": "data_ready", "train_batches": 40, "val_batches": 8, "train_examples": 2500, "val_examples": 500, "data_seconds": 1.2}
+{"epoch": 1, "train_loss": 2.0292, "train_accuracy": 0.2632, "val_loss": 1.9178, "val_accuracy": 0.296, "epoch_seconds": 50.8}
+{"event": "checkpoint_saved", "path": "/app/checkpoints/classifier_v1.pt", "epoch": 1}
+{"epoch": 2, "train_loss": 1.7498, "train_accuracy": 0.3384, "val_loss": 2.3598, "val_accuracy": 0.256, "epoch_seconds": 51.4}
+{"event": "no_improvement", "epoch": 2, "patience_counter": 1}
+{"event": "training_complete", "best_val_loss": 1.9178, "best_val_accuracy": 0.296, "checkpoint": "/app/checkpoints/classifier_v1.pt", "training_seconds": 102.4, "data_seconds": 1.2, "total_seconds": 103.6}
+
+## 4. Serving container
+
+$ docker run -d --name partc-serve -p 8080:8080 -v "$(pwd)/checkpoints:/app/checkpoints" mlops-serve:v1
+e520b52430a20aa0c3fc641bc66fb89e70dfedaf4fb26527f8a25681ec4491a6
+
+(waiting 40s for the HEALTHCHECK start period to elapse)
+
+$ curl -s localhost:8080/health
+{"status":"ok","model_loaded":true}
+$ curl -s localhost:8080/metadata
+{"class_names":["airplane","automobile","bird","cat","deer","dog","frog","horse","ship","truck"],"architecture":"resnet18","num_classes":10,"checkpoint_path":"/app/checkpoints/classifier_v1.pt","trained_epochs":1,"val_loss":1.9177873344421388,"val_accuracy":0.296}
+$ docker ps --filter name=partc-serve --format '{{.Image}}\t{{.Status}}'
+mlops-serve:v1	Up 40 seconds (healthy)
+
+## 5. Prediction endpoint
+
+$ ls -la test_image.png
+-rw-r--r--  1 ambethkrishnan  staff  21438 25 Aug 18:46 test_image.png
+
+$ curl -s -X POST http://localhost:8080/predict -F "image=@test_image.png"
+{"filename":"test_image.png","predicted_class":"cat","confidence":0.2227,"probabilities":{"airplane":0.0774,"automobile":0.0124,"bird":0.1779,"cat":0.2227,"deer":0.2091,"dog":0.1492,"frog":0.0588,"horse":0.0076,"ship":0.0724,"truck":0.0125}}
+
+$ docker rm -f partc-serve
+partc-serve
+
+==================================================================
+Capture complete: docs/logs/part-c-verification.txt

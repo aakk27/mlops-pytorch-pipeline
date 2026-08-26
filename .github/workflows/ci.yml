@@ -48,12 +48,14 @@ jobs:
           path: ~/.cache/pip
           key: pip-${{ runner.os }}-${{ hashFiles('requirements/*.txt') }}
 
-      - name: Install training dependencies (CPU-only torch)
+      - name: Install dependencies (CPU-only torch)
         run: |
           python -m pip install --upgrade pip
+          # Both requirement sets: tests/test_serve.py drives the FastAPI app,
+          # so the suite needs the serving dependencies as well as the training ones.
           pip install --index-url https://download.pytorch.org/whl/cpu \
                       --extra-index-url https://pypi.org/simple \
-                      -r requirements/train.txt
+                      -r requirements/train.txt -r requirements/serve.txt
           pip install pytest==9.1.1 httpx==0.28.1
 
       - name: Run tests

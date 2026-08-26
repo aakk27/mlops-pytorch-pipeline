@@ -1,0 +1,67 @@
+# syntax=docker/dockerfile:1.7
+#
+# Training image — multi-stage.
+#
+# Stage 1 (builder) resolves and installs the pinned dependency set into a
+# self-contained virtual environment. Stage 2 starts from a fresh slim base and
+# copies only that finished environment, so nothing pip needed in order to build
+# — caches, resolver metadata, any transient toolchain — ends up in the shipped
+# image. Application code is copied last because it changes far more often than
+# the dependencies, which keeps the expensive install layer cached across the
+# ordinary edit-rebuild cycle.
+
+# ---------------------------------------------------------------------------
+# Stage 1: dependency builder
+# ---------------------------------------------------------------------------
+FROM python:3.11-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
+
+WORKDIR /app
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Copied on its own so this layer is invalidated only by a dependency change,
+# not by every edit to src/.
+COPY requirements/train.txt ./requirements/train.txt
+RUN pip install --no-cache-dir -r requirements/train.txt
+
+# ---------------------------------------------------------------------------
+# Stage 2: training runtime
+# ---------------------------------------------------------------------------
+FROM python:3.11-slim AS training
+
+LABEL org.opencontainers.image.title="mlops-pytorch-pipeline-train" \
+      org.opencontainers.image.description="CIFAR-10 training workload" \
+      org.opencontainers.image.source="https://github.com/aakk27/mlops-pytorch-pipeline"
+
+# PYTHONUNBUFFERED is essential, not cosmetic: without it Python block-buffers
+# stdout when it is not a TTY, and `docker logs` / `kubectl logs` show nothing
+# until the process exits. The JSON-lines training metrics would be invisible
+# for the whole run.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    TRAINING_CONFIG_PATH=/app/configs/training_config.yaml
+
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+
+COPY src/ ./src/
+COPY configs/ ./configs/
+
+# Declared so the paths exist even when nothing is mounted over them; in normal
+# use both are backed by volumes (bind mounts locally, PVCs in the cluster).
+RUN mkdir -p /app/data /app/checkpoints
+VOLUME ["/app/data", "/app/checkpoints"]
+
+# The training script reads its configuration from TRAINING_CONFIG_PATH, which
+# points at the ConfigMap mount inside the cluster and at the baked-in copy
+# otherwise. Hyperparameters can be overridden per-run with MAX_EPOCHS,
+# BATCH_SIZE, LEARNING_RATE, NUM_WORKERS, SUBSET_FRACTION, DATA_DIR and
+# CHECKPOINT_DIR without rebuilding the image.
+ENTRYPOINT ["python", "src/train.py"]

@@ -228,12 +228,19 @@ cifar-10-batches-py/
 
 # Model checkpoints and training artefacts
 checkpoints/
+checkpoints-full/
 *.pt
 *.pth
 *.onnx
 runs/
 logs/
 *.jsonl
+
+# ...but captured verification logs are evidence and MUST be committed.
+# The negations must re-include the directory itself before its contents,
+# because git does not descend into an excluded directory.
+!docs/logs/
+!docs/logs/*.txt
 
 # Secrets — never commit real values, only .env.example
 .env
