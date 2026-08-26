@@ -5,10 +5,18 @@
 # Deployment mounts read-only.
 #
 # The demonstration overrides (SUBSET_FRACTION, MAX_EPOCHS) keep a cluster run
-# to a few minutes. The container is CPU-bound — Docker on macOS has no Metal
-# access — and a measured epoch on 5% of CIFAR-10 takes about 52 seconds with
-# the full Docker VM available, so a 2-CPU pod lands around 3-4 minutes. The
-# ConfigMap itself keeps the full 10-epoch values, so removing these two
+# short. The container is CPU-bound — Docker on macOS has no Metal access — and
+# the 2 CPU limit below is enforced, so an epoch on 5% of CIFAR-10 measured 258
+# seconds here against 52 seconds for the same image under `docker run` with the
+# whole Docker VM available. Measured Job duration: 8m42s with the dataset PVC
+# already populated.
+#
+# Budget for the first run on an empty dataset PVC: CIFAR-10 downloads before
+# the first epoch, measured at 33 minutes (data_seconds 1992.6). Later runs read
+# it from the volume in about a second. The serving Deployment's startupProbe is
+# sized to cover that window — see D-023.
+#
+# The ConfigMap itself keeps the full 10-epoch values, so removing these two
 # environment variables runs the real thing without editing anything else.
 apiVersion: batch/v1
 kind: Job

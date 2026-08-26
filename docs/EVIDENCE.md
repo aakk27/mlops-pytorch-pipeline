@@ -474,18 +474,193 @@ resize path in `PREPROCESS`.
 
 ## Stage 3 — Kubernetes manifests
 
-*(To be filled: `kubectl apply` output, `kubectl explain`/dry-run validation.)*
+Eight manifests, checked against every numeric requirement in Parts D and E
+before being applied — resource requests and limits, probe periods and
+thresholds, replica count, rolling update parameters, the read-only mount, and
+the Service port mapping. All passed.
 
-```
-```
+The cluster run that followed is recorded in Stage 4.
 
 ---
 
 ## Stage 4 — End-to-end on the cluster (Part F)
 
-*(To be filled: namespace/configmap/PVC/Job apply, Job logs, Job completion,
-serving Deployment rollout, pod status, `describe deployment`, HPA status,
-port-forward, `curl /predict` response.)*
+Full capture: `docs/logs/part-f-validation.txt`.
+Cold first run: `docs/logs/k8s-cold-run.txt`.
+Probe before/after: `docs/logs/startupprobe-before-after.txt`.
+
+### Apply and train
 
 ```
+$ kubectl apply -f k8s/namespace.yaml
+$ kubectl apply -f k8s/configmap.yaml
+$ kubectl apply -f k8s/pvc.yaml
+$ kubectl apply -f k8s/training-job.yaml
+job.batch/model-training created
+
+$ kubectl get pvc -n ml-training
+NAME             STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS
+checkpoint-pvc   Bound    pvc-73785a07-3e84-4301-a7c8-ffc210c6b937   1Gi        RWO            standard
+dataset-pvc      Bound    pvc-ea46f925-17b8-4437-9661-1990efcbb3f5   2Gi        RWO            standard
+
+$ kubectl wait --for=condition=complete job/model-training -n ml-training
+job.batch/model-training condition met
+
+$ kubectl get job/model-training -n ml-training
+NAME             STATUS     COMPLETIONS   DURATION   AGE
+model-training   Complete   1/1           8m42s      8m42s
 ```
+
+### Training logs from the cluster
+
+```
+{"event": "env_overrides_applied", "overrides": {"MAX_EPOCHS": 2, "NUM_WORKERS": 2, "SUBSET_FRACTION": 0.05}}
+{"event": "run_started", "config_path": "/app/configs/training_config.yaml", "device": "cpu", "architecture": "resnet18", "num_classes": 10, "trainable_parameters": 11173962, "epochs": 2, "batch_size": 64, "learning_rate": 0.001, "subset_fraction": 0.05}
+{"event": "data_ready", "train_batches": 40, "val_batches": 8, "train_examples": 2500, "val_examples": 500, "data_seconds": 1.4}
+{"epoch": 1, "train_loss": 2.0292, "train_accuracy": 0.2632, "val_loss": 1.9178, "val_accuracy": 0.296, "epoch_seconds": 258.8}
+{"event": "checkpoint_saved", "path": "/app/checkpoints/classifier_v1.pt", "epoch": 1}
+{"epoch": 2, "train_loss": 1.7498, "train_accuracy": 0.3384, "val_loss": 2.3598, "val_accuracy": 0.256, "epoch_seconds": 257.2}
+{"event": "no_improvement", "epoch": 2, "patience_counter": 1}
+{"event": "training_complete", "best_val_loss": 1.9178, "best_val_accuracy": 0.296, "checkpoint": "/app/checkpoints/classifier_v1.pt", "training_seconds": 516.1, "data_seconds": 1.4, "total_seconds": 517.6}
+```
+
+Three things to note.
+
+**`config_path` is the ConfigMap mount.** `/app/configs/training_config.yaml`
+is the volume, not the copy baked into the image — the ConfigMap is genuinely
+in control.
+
+**`data_seconds: 1.4`, against 1992.6 on the cold run.** The dataset PVC turned
+a 33 minute download into a 1.4 second read. This is the measurement behind
+D-024.
+
+**Metrics are identical to the Docker run**, to four decimal places, on a
+different runtime and a different filesystem hours apart. Same seed, same
+`NUM_WORKERS=2`. This is the strongest available demonstration of D-021.
+
+### Serving rollout
+
+```
+$ kubectl apply -f k8s/serving-deployment.yaml
+$ kubectl apply -f k8s/serving-service.yaml
+$ kubectl apply -f k8s/hpa.yaml
+
+$ kubectl rollout status deployment/model-serving -n ml-training
+deployment "model-serving" successfully rolled out
+```
+
+### Pods running and healthy
+
+```
+$ kubectl get pods -n ml-training -o wide
+NAME                            READY   STATUS      RESTARTS   AGE     IP            NODE
+model-serving-b6b78767f-8fgpf   1/1     Running     0          8m33s   10.244.0.11   minikube
+model-serving-b6b78767f-f2th9   1/1     Running     0          8m48s   10.244.0.9    minikube
+model-training-vjkwn            0/1     Completed   0          8m42s   10.244.0.10   minikube
+
+$ kubectl get svc,hpa -n ml-training
+NAME                    TYPE        CLUSTER-IP      PORT(S)   AGE
+service/model-serving   ClusterIP   10.96.208.247   80/TCP    31m
+
+NAME                                REFERENCE                  TARGETS                        MINPODS MAXPODS REPLICAS
+horizontalpodautoscaler/model-serving  Deployment/model-serving  cpu: 0%/70%, memory: 43%/80%   2       5       2
+```
+
+Two replicas, both `1/1`, zero restarts. The Job pod is `Completed` — Jobs leave
+their pod behind for log retrieval rather than deleting it.
+
+### `describe deployment` — Part E requirements
+
+```
+$ kubectl describe deployment model-serving -n ml-training
+Replicas:               2 desired | 2 updated | 2 total | 2 available | 0 unavailable
+StrategyType:           RollingUpdate
+RollingUpdateStrategy:  0 max unavailable, 1 max surge
+  Containers:
+   server:
+    Image:      mlops-serve:v1
+    Port:       8080/TCP (http)
+    Limits:     cpu: 1        memory: 2Gi
+    Requests:   cpu: 500m     memory: 1Gi
+    Liveness:   http-get http://:http/health delay=0s timeout=1s period=10s #success=1 #failure=3
+    Readiness:  http-get http://:http/health delay=15s timeout=1s period=5s #success=1 #failure=3
+    Startup:    http-get http://:http/health delay=0s timeout=1s period=10s #success=1 #failure=270
+    Mounts:     /app/checkpoints from checkpoints (ro)
+```
+
+Every Part E value is visible here: 2 replicas, rolling update 1/0, requests
+500m/1Gi, limits 1/2Gi, liveness every 10s with failureThreshold 3, readiness
+every 5s with a 15s delay, and the checkpoint volume mounted `(ro)`.
+
+### Prediction through the Service
+
+```
+$ kubectl port-forward svc/model-serving 8080:80 -n ml-training
+
+$ curl -s http://localhost:8080/health
+{"status":"ok","model_loaded":true}
+
+$ curl -s http://localhost:8080/metadata
+{"class_names":["airplane","automobile","bird","cat","deer","dog","frog","horse","ship","truck"],
+ "architecture":"resnet18","num_classes":10,
+ "checkpoint_path":"/app/checkpoints/classifier_v1.pt",
+ "trained_epochs":1,"val_loss":1.9177873344421388,"val_accuracy":0.296}
+
+$ curl -s -X POST http://localhost:8080/predict -F "image=@test_image.png"
+{"filename":"test_image.png","predicted_class":"cat","confidence":0.2227,
+ "probabilities":{"airplane":0.0774,"automobile":0.0124,"bird":0.1779,"cat":0.2227,
+ "deer":0.2091,"dog":0.1492,"frog":0.0588,"horse":0.0076,"ship":0.0724,"truck":0.0125}}
+```
+
+True label is `cat`, so the prediction is correct. `trained_epochs: 1` shows the
+serving pods are running the weights early stopping preserved when epoch 2
+regressed — the Job and the Deployment agree on which model won, having
+communicated only through the shared PVC.
+
+### The probe failure and its fix
+
+The first cluster run exposed a genuine defect. Captured mid-run, both states
+appear together:
+
+```
+NAME                             READY   STATUS             RESTARTS        AGE
+model-serving-5bd87fbdd7-j4lqc   0/1     CrashLoopBackOff   7 (4m40s ago)   16m   <- no startupProbe
+model-serving-5bd87fbdd7-xpmsp   0/1     CrashLoopBackOff   7 (4m40s ago)   16m   <- no startupProbe
+model-serving-676cfc9865-8xlnp   0/1     Running            0               12m   <- startupProbe added
+model-training-h9nnt             1/1     Running            0               36m
+```
+
+Identical images receiving identical 503 responses. The two without a
+`startupProbe` had restarted seven times; the one with it had not restarted at
+all. Full reasoning in D-023.
+
+Throughout, the readiness probe was correct:
+
+```
+$ kubectl get endpoints model-serving -n ml-training
+NAME            ENDPOINTS   AGE
+model-serving               2m32s
+```
+
+Empty endpoints — the Service refused to route to pods that could not serve.
+
+When the checkpoint finally appeared, every pod became ready without
+intervention, and the stalled rollout completed:
+
+```
+model-serving-5bd87fbdd7-xpmsp   1/1   Running       8 (5m42s ago)   17m
+model-serving-676cfc9865-8xlnp   1/1   Running       0               13m
+model-serving-5bd87fbdd7-j4lqc   1/1   Terminating   8 (5m46s ago)   17m
+```
+
+Old pods terminated only *after* a new pod reported Ready, which is
+`maxUnavailable: 0` doing its job.
+
+### Part F requirement coverage
+
+| Req | Claim | Evidence |
+|---|---|---|
+| F1 | Apply namespace, configmap, training job | All applied; Job reached `Complete 1/1` |
+| F2 | Deploy serving layer and HPA | Rollout succeeded; HPA active with real targets |
+| F3 | Pods running and healthy | 2/2 `1/1 Running`, 0 restarts; `describe deployment` captured |
+| F4 | Port-forward and test `/predict` | 200 with a correct prediction and a valid distribution |

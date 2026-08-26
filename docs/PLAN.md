@@ -23,12 +23,12 @@ satisfies it, so a reviewer can go straight from a mark to the code.
 | A1 | Public GitHub repository named `mlops-pytorch-pipeline` | [github.com/aakk27/mlops-pytorch-pipeline](https://github.com/aakk27/mlops-pytorch-pipeline) | Done |
 | A2 | Prescribed directory structure | `src/`, `configs/`, `docker/`, `k8s/`, `requirements/`, `tests/`, `.github/workflows/` | Done |
 | A3 | `develop` branch cut from `main` | `develop` | Done |
-| A4 | All work on feature branches | `feature/project-scaffold`, `feature/pytorch-model`, `feature/docker-*`, `feature/k8s-*` | In progress |
-| A5 | Every feature branch merged via PR with a meaningful description | PR bodies authored per stage, see §3 | In progress |
-| A6 | Minimum 2 PRs week 1, 2 PRs week 2 | 6 PRs planned, one per stage plus the release PR | In progress |
-| A7 | Conventional Commits | `chore(scaffold):`, `feat(model):`, `feat(docker):`, `feat(k8s):` | In progress |
+| A4 | All work on feature branches | 5 feature/docs branches, no direct commits to `develop` or `main` | Done |
+| A5 | Every feature branch merged via PR with a meaningful description | PRs #1-#6 | Done |
+| A6 | Minimum 2 PRs week 1, 2 PRs week 2 | 6 PRs, one per stage plus the release PR | Done |
+| A7 | Conventional Commits | `chore`, `feat`, `fix`, `ci`, `docs` scopes throughout | Done |
 | A8 | `.gitignore` | `.gitignore` — datasets, checkpoints, `.env`, secret manifests | Done |
-| A9 | Secrets management | `.env.example`, `k8s/secret.example.yaml`, secrets excluded by `.gitignore` | Partial — K8s Secret lands in Stage 3 |
+| A9 | Secrets management | `.env.example`, `k8s/secret.example.yaml`, `*secret*.yaml` excluded by `.gitignore` | Done |
 
 ### Part B — PyTorch Model (10 points)
 
@@ -61,44 +61,44 @@ satisfies it, so a reviewer can go straight from a mark to the code.
 
 | # | Requirement | Where satisfied | Status |
 |---|---|---|---|
-| D1 | `k8s/namespace.yaml` | `k8s/namespace.yaml` | Stage 3 |
-| D2 | `k8s/configmap.yaml` | `k8s/configmap.yaml` | Stage 3 |
-| D3 | Job uses the training image | `k8s/training-job.yaml` | Stage 3 |
-| D4 | ConfigMap mounted as a volume at `/app/configs` | `k8s/training-job.yaml` | Stage 3 |
-| D5 | PVCs for `/app/data` and `/app/checkpoints` | `k8s/pvc.yaml` | Stage 3 |
-| D6 | Resource requests and limits (2 CPU, 4Gi) | `k8s/training-job.yaml` | Stage 3 |
-| D7 | **Bonus:** GPU request with nodeSelector or toleration | `k8s/training-job.yaml` (documented, disabled by default) | Stage 3 |
+| D1 | `k8s/namespace.yaml` | `k8s/namespace.yaml` | Done — verified on cluster |
+| D2 | `k8s/configmap.yaml` | `k8s/configmap.yaml` | Done — verified on cluster |
+| D3 | Job uses the training image | `k8s/training-job.yaml` | Done — verified on cluster |
+| D4 | ConfigMap mounted as a volume at `/app/configs` | `k8s/training-job.yaml` | Done — verified on cluster |
+| D5 | PVCs for `/app/data` and `/app/checkpoints` | `k8s/pvc.yaml` | Done — verified on cluster |
+| D6 | Resource requests and limits (2 CPU, 4Gi) | `k8s/training-job.yaml` | Done — verified on cluster |
+| D7 | **Bonus:** GPU request with nodeSelector or toleration | `k8s/training-job.yaml` (documented, disabled) | Written, not executable on this hardware |
 
 ### Part E — Kubernetes Model Serving (5 points)
 
 | # | Requirement | Where satisfied | Status |
 |---|---|---|---|
-| E1 | 2 replicas | `k8s/serving-deployment.yaml` | Stage 3 |
-| E2 | Checkpoint PVC mounted read-only at `/app/checkpoints` | `k8s/serving-deployment.yaml` | Stage 3 |
-| E3 | Liveness probe: `/health` every 10s, failureThreshold 3 | `k8s/serving-deployment.yaml` | Stage 3 |
-| E4 | Readiness probe: `/health` every 5s, initialDelay 15s | `k8s/serving-deployment.yaml` | Stage 3 |
-| E5 | Requests 500m/1Gi, limits 1/2Gi | `k8s/serving-deployment.yaml` | Stage 3 |
-| E6 | Rolling update, maxSurge 1, maxUnavailable 0 | `k8s/serving-deployment.yaml` | Stage 3 |
-| E7 | Service exposing port 80 to container port 8080 | `k8s/serving-service.yaml` | Stage 3 |
+| E1 | 2 replicas | `k8s/serving-deployment.yaml` | Done — verified on cluster |
+| E2 | Checkpoint PVC mounted read-only at `/app/checkpoints` | `k8s/serving-deployment.yaml` | Done — verified on cluster |
+| E3 | Liveness probe: `/health` every 10s, failureThreshold 3 | `k8s/serving-deployment.yaml` | Done — verified on cluster |
+| E4 | Readiness probe: `/health` every 5s, initialDelay 15s | `k8s/serving-deployment.yaml` | Done — verified on cluster |
+| E5 | Requests 500m/1Gi, limits 1/2Gi | `k8s/serving-deployment.yaml` | Done — verified on cluster |
+| E6 | Rolling update, maxSurge 1, maxUnavailable 0 | `k8s/serving-deployment.yaml` | Done — verified on cluster |
+| E7 | Service exposing port 80 to container port 8080 | `k8s/serving-service.yaml` | Done — verified on cluster |
 
 ### Part F — End-to-End Validation (10 points)
 
 | # | Requirement | Where satisfied | Status |
 |---|---|---|---|
-| F1 | Apply namespace, configmap, training job | `docs/RUNBOOK.md` §5, `docs/EVIDENCE.md` | Stage 4 |
-| F2 | Deploy serving layer and HPA | `docs/RUNBOOK.md` §5, `k8s/hpa.yaml` | Stage 4 |
-| F3 | Verify pods running and healthy | `docs/EVIDENCE.md` | Stage 4 |
-| F4 | Port-forward and test `/predict` | `docs/EVIDENCE.md` | Stage 4 |
+| F1 | Apply namespace, configmap, training job | `docs/RUNBOOK.md` §5, `docs/EVIDENCE.md` | Done |
+| F2 | Deploy serving layer and HPA | `docs/RUNBOOK.md` §5, `k8s/hpa.yaml` | Done |
+| F3 | Verify pods running and healthy | `docs/EVIDENCE.md` | Done |
+| F4 | Port-forward and test `/predict` | `docs/EVIDENCE.md` | Done |
 
 ### Submission
 
 | # | Requirement | Where satisfied | Status |
 |---|---|---|---|
-| S1 | All code merged to `main` via PRs | Release PR `develop` → `main` | Stage 4 |
-| S2 | README with setup instructions | `README.md` | Stage 4 |
-| S3 | README with architecture diagram | `README.md` (Mermaid) | Stage 4 |
-| S4 | At least 4 merged PRs with meaningful descriptions | 6 planned | In progress |
-| S5 | 300–500 word reflection write-up | `docs/REFLECTION.md` | Stage 4 |
+| S1 | All code merged to `main` via PRs | Release PR `develop` → `main` | Done |
+| S2 | README with setup instructions | `README.md` | Done |
+| S3 | README with architecture diagram | `README.md` (Mermaid) | Done |
+| S4 | At least 4 merged PRs with meaningful descriptions | 6 PRs | Done |
+| S5 | 300–500 word reflection write-up | `docs/REFLECTION.md` (502 words) | Done |
 
 ---
 
@@ -124,10 +124,10 @@ satisfies it, so a reviewer can go straight from a mark to the code.
 |---|---|---|---|---|
 | 0 | `feature/project-scaffold` | #1 | Structure, `.gitignore`, `.dockerignore`, CI, `pyproject.toml`, `.env.example`, `Makefile` | **Merged** |
 | 1 | `feature/pytorch-model` | #2 | `model.py`, `dataset.py`, `train.py`, `serve.py`, configs, pinned requirements, 22 tests | **Merged** |
-| 1b | `docs/traceability` | #3 | `docs/PLAN.md`, `DECISIONS.md`, `RUNBOOK.md`, `EVIDENCE.md` | PR open |
-| 2 | `feature/docker-training` | #4 | `Dockerfile.train`, `Dockerfile.serve`, local build/run evidence | Built and verified, PR open |
-| 3 | `feature/k8s-deployment` | #5 | All `k8s/` manifests including HPA and the GPU bonus block | Pending |
-| 4 | `feature/e2e-validation` | #6 | Cluster run evidence, README, architecture diagram, reflection | Pending |
+| 1b | `docs/traceability` | #3 | `docs/PLAN.md`, `DECISIONS.md`, `RUNBOOK.md`, `EVIDENCE.md` | **Merged** |
+| 2 | `feature/docker-training` | #4 | `Dockerfile.train`, `Dockerfile.serve`, local build/run evidence | **Merged** |
+| 3 | `feature/k8s-deployment` | #5 | All `k8s/` manifests including HPA and the GPU bonus block | **Merged** |
+| 4 | `feature/e2e-validation` | #6 | Cluster run evidence, README, architecture diagram, reflection | In review |
 | — | `develop` → `main` | #7 | Release PR | Pending |
 
 Branching model: feature branches are cut from `develop` and merged into
@@ -155,11 +155,42 @@ rather than a single burst, which matches the brief's "2 PRs per week" intent.
 |---|---|---|---|
 | Training Job stays `Pending` because the node cannot satisfy 2 CPU / 4Gi | Blocks Part D and F | minikube started with `--cpus=4 --memory=7168` | Mitigated |
 | Docker Desktop VM capped below the requested minikube memory | Cluster will not start | Requested 7168MB against the 7936MB cap | Mitigated |
-| minikube cannot pull locally built images | `ImagePullBackOff` | `eval $(minikube docker-env)` before building, `imagePullPolicy: IfNotPresent` | Planned, Stage 3 |
-| Serving pods cannot read the checkpoint the Job wrote | Part E fails | Single `ReadWriteOnce` PVC, single-node cluster, serving mounts it read-only | Planned, Stage 3 |
-| HPA reports `<unknown>` targets | Part F evidence incomplete | `minikube addons enable metrics-server` | Mitigated |
+| minikube cannot pull locally built images | `ImagePullBackOff` | `eval $(minikube docker-env)` before building, `imagePullPolicy: IfNotPresent` | Resolved — no pull errors occurred |
+| Serving pods cannot read the checkpoint the Job wrote | Part E fails | Single `ReadWriteOnce` PVC, single-node cluster, serving mounts it read-only | Resolved — verified end to end |
+| HPA reports `<unknown>` targets | Part F evidence incomplete | metrics-server addon; resolves once pods are Ready | Resolved — `cpu: 0%/70%, memory: 43%/80%` |
 | CIFAR-10 download slow or unavailable inside the Job | Training Job fails | Dataset PVC persists the download across runs; `subset_fraction` limits the work | Mitigated |
 | GPU bonus cannot be executed | 5 bonus points | Manifest provided and documented as untested on this hardware; stated honestly | Accepted |
 | Full 10-epoch CPU training exceeds the deadline | Schedule | `SUBSET_FRACTION` / `MAX_EPOCHS` env overrides for demonstration runs | Mitigated |
 | No `linux/arm64` CPU wheel for the pinned torch | Docker build fails | PyPI fallback via `--extra-index-url` | Resolved — wheel installed in 65s |
 | Containers are ~11x slower than local MPS | K8s Job demo too slow | Job sized from the measured containerised epoch (~52s), not the local one | Mitigated |
+
+
+---
+
+## 6. Late findings
+
+Two things only the live cluster revealed, both recorded in full in
+`docs/DECISIONS.md`:
+
+**The liveness probe restart loop (D-023).** Serving pods entered
+`CrashLoopBackOff` while waiting for a checkpoint that did not exist yet.
+Corrected with a `startupProbe`. D-009's original reasoning is left in place and
+marked as revisited rather than quietly rewritten.
+
+**The dataset download cost (D-024).** The cold Job spent 1992.6 seconds
+downloading CIFAR-10 against 520.5 seconds of training. With the PVC warm the
+same step took 1.4 seconds. This is the measured justification for separating
+the dataset and checkpoint claims.
+
+---
+
+## 7. Known gaps
+
+`docs/BACKLOG.md` records what this project does not do: five conscious
+deviations from the brief, and 28 items of follow-up work across correctness,
+security, operations, ML quality, testing and documentation — each with a
+priority, an effort estimate, and the reasoning behind leaving it.
+
+The only gap still open against the brief itself is the full 10-epoch training
+run on the complete dataset. Everything else is either satisfied or a documented
+trade.
