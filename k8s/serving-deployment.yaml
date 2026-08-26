@@ -64,15 +64,35 @@ spec:
               port: http
             initialDelaySeconds: 15
             periodSeconds: 5
-          # Liveness restarts a genuinely stuck process. The generous
-          # failureThreshold and initialDelay matter because this probe also
-          # returns 503 while no checkpoint exists — without that slack, pods
-          # started before the training Job finished would restart in a loop.
+          # A startupProbe suspends the liveness and readiness probes until it
+          # succeeds once. Without it the liveness probe kills this pod long
+          # before the training Job has written a checkpoint: /health returns
+          # 503 until the model loads, so three failures at a 10s period restart
+          # the container roughly every minute, forever.
+          #
+          # 270 failures x 10s allows 45 minutes for the checkpoint to appear.
+          # Sized from measurement, not guesswork: on a cold cluster the Job
+          # spent 33 minutes downloading CIFAR-10 into an empty dataset PVC
+          # before training began, and a pod started alongside it went ready at
+          # the 13 minute mark on a warm run. An earlier value of 90 (15 min)
+          # left almost no margin.
+          #
+          # A startupProbe failing is not catastrophic — the pod restarts and
+          # tries again — but each restart discards progress toward readiness,
+          # so the budget should comfortably exceed worst-case training time.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 270
+          # Liveness restarts a genuinely stuck process. It only begins once the
+          # startupProbe has passed, so a slow first checkpoint is never treated
+          # as a hung server.
           livenessProbe:
             httpGet:
               path: /health
               port: http
-            initialDelaySeconds: 30
             periodSeconds: 10
             failureThreshold: 3
           resources:
