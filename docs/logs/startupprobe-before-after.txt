@@ -1,0 +1,4 @@
+NAME                             READY   STATUS      RESTARTS   AGE
+model-serving-676cfc9865-4lbrq   1/1     Running     0          5m8s
+model-serving-676cfc9865-8xlnp   1/1     Running     0          18m
+model-training-h9nnt             0/1     Completed   0          42m

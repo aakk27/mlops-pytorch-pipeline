@@ -163,7 +163,13 @@ Deployment runs two replicas behind a Service.
 
 ## D-009 — `/health` serves both probes, and retries loading
 
-**Date:** 2026-08-25 · **Status:** Accepted
+**Date:** 2026-08-25 · **Status:** Revisited — see D-023
+
+> **This entry's reasoning was partly wrong.** The claim below that a generous
+> `initialDelaySeconds` and `failureThreshold` prevent a liveness restart loop
+> did not survive contact with the cluster. It was corrected by adding a
+> `startupProbe` (D-023). The original text is left intact rather than edited,
+> so the mistake and its correction are both on record.
 
 **Context.** The brief points both the liveness and readiness probes at
 `GET /health`, and specifies it returns 200 when the model is loaded. But the
@@ -464,3 +470,78 @@ docker: invalid reference format: repository name (DA5402W) must be lowercase
 **Why it is worth an entry.** The error message names a repository, so it reads
 as a Docker tagging problem rather than a shell quoting one. Recording the
 symptom next to the real cause saves the next diagnosis.
+
+---
+
+## D-023 — A `startupProbe` guards the slow first checkpoint
+
+**Date:** 2026-08-26 · **Status:** Accepted · **Corrects:** D-009
+
+**What happened.** On the first real cluster run the serving pods entered
+`CrashLoopBackOff` while the training Job was still downloading CIFAR-10:
+
+```
+model-serving-5bd87fbdd7-j4lqc   0/1   CrashLoopBackOff   7 (4m40s ago)   16m
+```
+
+The readiness probe behaved correctly throughout — `kubectl get endpoints`
+showed `<none>`, so the Service routed nothing to pods that could not serve.
+The *liveness* probe was the problem. It also targets `/health`, which returns
+503 until a checkpoint exists, so three failures at a 10-second period restarted
+the container roughly every minute, indefinitely.
+
+**Why D-009's mitigation failed.** That entry argued a longer
+`initialDelaySeconds` plus `failureThreshold: 3` gave enough slack. It gives
+about 50 seconds. The gap being covered here is however long training takes —
+on a cold cluster, 42 minutes. The mitigation was two orders of magnitude short.
+
+**Decision.** Add a `startupProbe` on `/health`. A startupProbe suspends both
+the liveness and readiness probes until it succeeds once, so a container that is
+slow to become useful is never mistaken for one that has hung.
+
+**Sizing.** Initially `failureThreshold: 90` at a 10s period — a 15 minute
+budget. Measurement showed that was too tight: a pod started alongside a cold
+training Job went ready at the 13 minute mark, leaving two minutes of margin,
+and a genuinely cold cluster spent 33 minutes on the dataset download alone. It
+is now `270` (45 minutes).
+
+**Evidence.** A single `kubectl get pods` captured mid-run shows both states at
+once — old pods without the startupProbe at 7 restarts and climbing, a new pod
+with it at 0 restarts after 12 minutes of the identical 503 response.
+
+**Worth noting:** the old pods did eventually recover on their own once the
+checkpoint appeared, because `serve.py` retries the load on every health call.
+So the retry in D-009 was necessary and correct — it is what makes recovery
+possible at all. The startupProbe is what makes recovery *quiet*, without
+paying eight restarts and a `CrashLoopBackOff` to get there.
+
+**Why local testing never caught it.** In Docker the serving container was
+always started after training had finished, so `/health` returned 200
+immediately and liveness never fired once. The failure needs a scheduler that
+starts a Deployment before its dependency exists — which is exactly what an
+orchestrator does, and exactly what `docker run` does not.
+
+**Requirements are unaffected.** Liveness is still `GET /health` every 10s with
+`failureThreshold: 3`; readiness is still every 5s with a 15s initial delay, as
+the brief specifies. The startupProbe is additive.
+
+---
+
+## D-024 — The dataset PVC is separate from the checkpoint PVC
+
+**Date:** 2026-08-26 · **Status:** Accepted
+
+**Decision.** Two PersistentVolumeClaims rather than one shared volume.
+
+**Measured justification.** The first cluster Job spent **1992.6 seconds** —
+just over 33 minutes — downloading CIFAR-10 into an empty `dataset-pvc`, against
+**520.5 seconds** of actual training. The second run, with the same claim now
+populated, reported `data_seconds: 1.4`.
+
+That is the entire argument. Combining the claims, or letting the dataset live
+in the container's ephemeral layer, would repeat a 33 minute download on every
+Job run.
+
+The separation also expresses different lifecycles: the dataset is an input that
+outlives any particular run, while the checkpoint is an output that a specific
+run produces and the serving Deployment consumes.
