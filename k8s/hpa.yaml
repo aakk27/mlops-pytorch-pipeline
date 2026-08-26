@@ -1,0 +1,44 @@
+# HorizontalPodAutoscaler for the serving Deployment.
+#
+# Requires metrics-server, which minikube does not install by default:
+#   minikube addons enable metrics-server
+# Without it the HPA reports targets as <unknown> and never scales.
+#
+# The CPU target is expressed against the Deployment's *request* (500m), so
+# averageUtilization: 70 means scaling out once pods average 350m.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: model-serving
+  namespace: ml-training
+  labels:
+    app: model-serving
+    project: mlops-pytorch-pipeline
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: model-serving
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleUp:
+      # React quickly to load.
+      stabilizationWindowSeconds: 60
+    scaleDown:
+      # Scale in slowly, so a brief lull does not tear down capacity that is
+      # about to be needed again.
+      stabilizationWindowSeconds: 300
