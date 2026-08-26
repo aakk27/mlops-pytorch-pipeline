@@ -1,0 +1,94 @@
+# Serving Deployment.
+#
+# Two replicas of the inference API, each mounting the checkpoint PVC read-only.
+# Both pods land on the same node (single-node cluster, ReadWriteOnce volume),
+# which is what lets them share a volume the Job wrote.
+#
+# The deployment can legitimately be applied before training has finished. In
+# that case /health returns 503, the readiness probe keeps the pods out of the
+# Service, and each pod becomes ready by itself once the checkpoint appears —
+# serve.py re-attempts the load on every health call rather than deciding once
+# at start-up.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-serving
+  namespace: ml-training
+  labels:
+    app: model-serving
+    project: mlops-pytorch-pipeline
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: model-serving
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # maxUnavailable 0 means capacity never dips below two ready pods during
+      # a rollout; maxSurge 1 allows one extra pod while the swap happens.
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: model-serving
+    spec:
+      securityContext:
+        # The image already declares USER 1001; restating it here lets the
+        # cluster enforce it rather than trust the image, and fsGroup makes the
+        # mounted volume readable by that user.
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+      containers:
+        - name: server
+          image: mlops-serve:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: MODEL_CHECKPOINT_PATH
+              value: /app/checkpoints/classifier_v1.pt
+          volumeMounts:
+            - name: checkpoints
+              mountPath: /app/checkpoints
+              readOnly: true
+          # Readiness gates traffic: a pod without a checkpoint stays out of the
+          # Service endpoints instead of returning 503 to callers.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 5
+          # Liveness restarts a genuinely stuck process. The generous
+          # failureThreshold and initialDelay matter because this probe also
+          # returns 503 while no checkpoint exists — without that slack, pods
+          # started before the training Job finished would restart in a loop.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: checkpoints
+          persistentVolumeClaim:
+            claimName: checkpoint-pvc
+            readOnly: true

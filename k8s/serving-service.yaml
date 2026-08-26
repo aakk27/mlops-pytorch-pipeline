@@ -1,0 +1,25 @@
+# ClusterIP Service fronting the serving Deployment.
+#
+# Exposes port 80 and forwards to the container's 8080. ClusterIP is correct for
+# minikube: LoadBalancer would sit in <pending> forever with no cloud controller
+# to assign an external address. Access from outside the cluster is via
+# `kubectl port-forward svc/model-serving 8080:80 -n ml-training`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-serving
+  namespace: ml-training
+  labels:
+    app: model-serving
+    project: mlops-pytorch-pipeline
+spec:
+  type: ClusterIP
+  selector:
+    app: model-serving
+  ports:
+    - name: http
+      port: 80
+      # Named rather than numeric: the Deployment declares `name: http` on its
+      # container port, so changing that port needs no edit here.
+      targetPort: http
+      protocol: TCP
