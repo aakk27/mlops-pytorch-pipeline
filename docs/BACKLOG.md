@@ -16,14 +16,15 @@ find rather than buried in a decision log.
 
 | # | Deviation | Why | Reference |
 |---|---|---|---|
-| 1 | Demonstration runs use `SUBSET_FRACTION=0.05, MAX_EPOCHS=2` instead of the brief's bare `docker run` (10 epochs, full dataset) | A full CPU run is ~3 hours; the mechanism under test is identical | D-005 |
+| 1 | ~~Demonstration runs use `SUBSET_FRACTION=0.05, MAX_EPOCHS=2` instead of the brief's bare `docker run`~~ | **CLOSED 2026-08-27.** The full 10-epoch run on all 50,000 images completed in 8h 10m, reaching 0.8718 validation accuracy. Short runs remain the default for demonstrations; the full run is evidenced in `EVIDENCE.md` Stage 5 | D-005 |
 | 2 | GPU bonus manifest written but never executed | No NVIDIA hardware; Apple Metal is unreachable from a Linux container | D-017 |
 | 3 | AI assistance disclosed once in the README rather than in every commit message | Author preference; the brief's wording asks for commit messages | D-014 |
 | 4 | `k8s/pvc.yaml` added beyond the brief's six-file list | The brief requires PVCs without specifying a file; separating claims from workloads is cleaner | D-024 |
 | 5 | A `startupProbe` added alongside the two required probes | Without it the required liveness configuration restarts pods indefinitely | D-023 |
 
-**The full 10-epoch run is the one worth closing.** Everything else is defensible
-as-is; that one is only unclosed because of wall-clock.
+**Deviation 1 is now closed** — the full run completed on 2026-08-27. The
+remaining four are defensible as-is: two are hardware limits, one is a
+disclosure-placement choice, and one is a file the brief did not enumerate.
 
 ---
 
@@ -159,6 +160,13 @@ shipper — but nothing ships it. The serving app exposes no `/metrics`, so ther
 is no request rate, latency or error-rate visibility. Prometheus plus a
 `ServiceMonitor` would be the obvious step.
 
+**This gap has already cost an explanation.** During the full training run,
+epochs 2-5 took roughly six times longer than epochs 1 and 6-10 (see
+`EVIDENCE.md` Stage 5). Because nothing recorded host CPU, memory pressure or
+thermal state alongside the training log, the cause cannot be attributed after
+the fact — only guessed at. Emitting host metrics with each epoch, or scraping
+them separately, would have answered it in seconds.
+
 ### 4.6 No PodDisruptionBudget or anti-affinity
 **Priority: low · Effort: trivial**
 
@@ -177,16 +185,21 @@ rather than a line in a runbook someone has to read.
 
 ## 5. ML quality
 
-### 5.1 The model is barely trained
-**Priority: high (if the model matters) · Effort: small**
+### 5.1 ~~The model is barely trained~~ — RESOLVED
+**Closed 2026-08-27**
 
-~30% validation accuracy from 2 epochs on 5% of CIFAR-10. Chance is 10%, so it
-has learned something, but nothing anyone would deploy. A full 10-epoch run on
-the complete dataset should reach 70-80%.
+The full 10-epoch run on all 50,000 images reached **0.8718 validation
+accuracy**, with a 2.2 point train/validation gap. The prediction in this entry
+was 70-80%; the actual result exceeded it.
 
-This was a deliberate trade for iteration speed and is not a defect in the
-pipeline — but every prediction demo in this repository is made by a weak model,
-and that is worth stating plainly.
+The short-run checkpoints (0.296 accuracy) are still what the Kubernetes
+demonstrations use, because a 3-4 minute Job is more useful for exercising the
+pipeline than an 8-hour one. That is now a deliberate choice between two
+available checkpoints rather than the only model that exists.
+
+Validation loss was still falling at epoch 10, so the ceiling has not been
+found. Items 5.2 (learning-rate schedule) and 5.3 (held-out test split) remain
+the obvious next steps for anyone who wants a better number.
 
 ### 5.2 No learning-rate schedule
 **Priority: medium · Effort: trivial**
@@ -279,5 +292,5 @@ If someone picked this up tomorrow:
 1. **Registry and SHA tags** (4.1, 4.2) — everything else in ops depends on it
 2. **Checkpoint versioning** (2.2) — currently one Job run away from data loss
 3. **Env-override and early-stopping tests** (6.1, 6.2) — cheap, and they guard the most load-bearing logic
-4. **The full training run** (5.1, deviation 1) — one overnight run closes the last real gap against the brief
+4. ~~**The full training run**~~ — done, 2026-08-27
 5. **Integration test in CI** (6.3) — would have caught the bug that cost the most time here
