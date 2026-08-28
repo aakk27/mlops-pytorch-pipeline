@@ -226,6 +226,9 @@ per-class recall would say considerably more than a single scalar.
 `www.cs.toronto.edu` took 33 minutes and is the only source. An internal mirror
 or a pre-populated volume would make cold starts predictable.
 
+Partially mitigated for CI: the integration job caches `data/` between runs, so
+only the first run touches that host.
+
 ---
 
 ## 6. Testing
@@ -266,12 +269,34 @@ Also covered: equal loss is not an improvement (the comparison is strict), the
 reported best metrics track the best epoch rather than the last, and a patience
 below 1 is rejected instead of stopping before any epoch can fail.
 
-### 6.3 No integration test in CI
-**Priority: medium · Effort: medium**
+### 6.3 ~~No integration test in CI~~ — RESOLVED
+**Closed 2026-08-28**
 
-CI lints, unit tests, and builds both images — but never runs a container. A
-smoke test that trains for one epoch on a tiny subset and then curls `/predict`
-would have caught the probe bug far earlier than a manual cluster run did.
+The `docker` job now builds both images with `load: true` and runs them, in the
+order Kubernetes uses — **serving starts before any checkpoint exists**. That
+ordering is the whole point: it is what exposed the liveness restart loop
+(D-023), and what no local test reproduced, because locally the checkpoint
+always already existed.
+
+The job asserts, in sequence:
+
+1. `/health` returns **503** with an empty checkpoint volume, and the container
+   stays running
+2. The training container completes one epoch on a 2% subset and writes a
+   checkpoint
+3. The **same** container — no restart, no redeploy — then returns **200**,
+   with `RestartCount` still 0. This is the retry-on-health-call contract from
+   D-009, verified at container level rather than in a unit test
+4. Docker's own `HEALTHCHECK` transitions to `healthy`, so the declared health
+   check agrees with the endpoint
+5. `POST /predict` returns ten classes summing to 1.0, with the predicted class
+   among them
+6. `/metadata` reports the architecture from the checkpoint
+
+CIFAR-10 is cached between runs, keeping the job off a slow university host that
+has been a single point of failure (5.5).
+
+On failure the job dumps the serving container's logs before tearing down.
 
 ### 6.4 No manifest validation in CI
 **Priority: medium · Effort: small**
@@ -314,4 +339,4 @@ If someone picked this up tomorrow:
 2. **Checkpoint versioning** (2.2) — currently one Job run away from data loss
 3. ~~**Env-override and early-stopping tests**~~ — done, 2026-08-28
 4. ~~**The full training run**~~ — done, 2026-08-27
-5. **Integration test in CI** (6.3) — would have caught the bug that cost the most time here
+5. ~~**Integration test in CI**~~ — done, 2026-08-28
