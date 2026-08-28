@@ -1,47 +1,48 @@
 # Reflection
 
-Three things caught me out on this assignment, and all three had the same shape:
-something worked perfectly at one layer and broke at the next.
+Three things caught me out, and they all had the same shape: something worked at
+one layer and broke at the next.
 
 The first was a Kubernetes probe. My serving app returns 503 from `/health`
-until a checkpoint is loaded, which seemed sensible — the readiness probe then
-keeps unready pods out of the Service. But the assignment points the *liveness*
-probe at the same endpoint. In Docker that never mattered, because I always
-started the serving container after training had already finished, so `/health`
-returned 200 straight away. On the cluster the Deployment legitimately comes up
-while the training Job is still running. Liveness got three 503s, restarted the
-container, and then did it again about once a minute. I watched pods accumulate
-four restarts before I worked out what I was looking at. The fix was a
-`startupProbe`, which suspends liveness and readiness until it passes once —
-obvious in hindsight. What bothers me is that I had already written a paragraph
-in my decision log explaining why padding `initialDelaySeconds` was sufficient.
-It wasn't, and no amount of local testing would have told me.
+until a checkpoint loads, which is what lets the readiness probe keep unready
+pods out of the Service. But the assignment points the *liveness* probe at the
+same endpoint. In Docker that never mattered: I always started serving after
+training finished. On the cluster the Deployment comes up while the Job is still
+running. Liveness got three 503s, restarted the container, and did it again a
+minute later. I watched pods reach four restarts before I understood what I was
+looking at. The fix was a `startupProbe`, which suspends liveness until it
+passes once — obvious afterwards. What bothers me is that my decision log
+already explained why padding `initialDelaySeconds` was enough. It buys about
+fifty seconds. The gap was forty minutes.
 
-The second was hardware I couldn't use. The Mac mini has an Apple Silicon GPU
-and PyTorch picks it up as MPS, so an epoch on 5% of CIFAR-10 takes 4.7 seconds.
-The same image inside Docker reports `device: cpu` and takes 52. Metal is a
-macOS framework, Docker containers on macOS run inside a Linux VM, and
-Kubernetes sits one layer further in again. There is no flag that fixes this. I
-spent a while looking for one before accepting that the 11x gap is
-architectural, and that the GPU bonus manifest I wrote can be correct without
-ever being executable on this machine.
+The second was hardware I couldn't use. The Mac mini has an Apple GPU and
+PyTorch picks it up as MPS: 4.7 seconds an epoch on a subset. The same image
+inside Docker reports `device: cpu` and takes 52. Metal is macOS-only, Docker
+containers run in a Linux VM, and Kubernetes sits one layer deeper again. The
+gap is architectural, and the GPU bonus manifest I wrote can be correct without
+ever being executable here.
 
-The third was CI. My tests passed locally and then failed on the first clean
-checkout with `ModuleNotFoundError: No module named 'fastapi'`. My virtualenv
-had both requirements files installed, so a CI job installing only the training
-set was exercising a configuration I had never actually run. That took thirty
-seconds to fix and taught me more than the fix suggests: my own machine had been
-quietly hiding a genuine gap in the dependency declarations.
+The third was CI. My tests passed locally and failed on the first clean
+checkout: `ModuleNotFoundError: No module named 'fastapi'`. My virtualenv had
+both requirements files installed, so CI was testing a configuration I had never
+run. Thirty seconds to fix, and it taught me more than the fix suggests.
 
-Underneath all three is the same lesson. Each layer — virtualenv, container,
-orchestrator, CI runner — makes assumptions that the layer below happened to
-satisfy by accident. Containerisation gets sold as "it runs the same
-everywhere", and that is true of the code. It is not true of the surroundings:
-what hardware you can reach, what is already sitting on disk, and when your
-dependencies exist relative to when you start needing them. Almost all of my
-debugging time went there rather than into PyTorch.
+The problem that cost the most time wasn't in the code at all. My shell still
+had `eval $(minikube docker-env)` set from the Kubernetes work, so every
+`docker run` talked to minikube's daemon, not Docker Desktop's. The volume
+mounts resolved inside the minikube node where those paths don't exist, and
+Docker silently created empty directories. That produced a 38-minute
+re-download, a checkpoint on the wrong filesystem, and an OOM kill inside a
+container already capped for Kubernetes. Three symptoms, one stale environment
+variable, and no error until the daemon went away.
 
-If I did it again I would deploy to the cluster much earlier, even with a stub
-model that returns nonsense. Every one of these problems appeared at an
-integration boundary, and I did not reach a single one of those boundaries until
-day two.
+Underneath all of it is the same lesson. Each layer — virtualenv, container,
+orchestrator, CI runner — relies on assumptions the layer below happened to
+satisfy. Containerisation is sold as "it runs the same everywhere". That is true
+of the code. It is not true of the surroundings: what hardware you can reach,
+what is already on disk, which daemon you are talking to, and when your
+dependencies exist relative to when you need them.
+
+If I did it again I would deploy to the cluster on day one, with a stub model
+that returns nonsense. Every one of these appeared at an integration boundary,
+and I did not reach one until day two.
