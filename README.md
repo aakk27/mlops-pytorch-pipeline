@@ -61,7 +61,7 @@ docker/       Dockerfile.train, Dockerfile.serve
 k8s/          namespace, configmap, pvc, training-job,
               serving-deployment, serving-service, hpa, secret.example
 requirements/ train.txt, serve.txt  (all versions pinned)
-tests/        test_model.py, test_serve.py  (22 tests)
+tests/        test_model.py, test_serve.py, test_train.py  (52 tests)
 docs/         PLAN, DECISIONS, RUNBOOK, EVIDENCE, BACKLOG,
               REFLECTION, logs/
 ```
@@ -172,21 +172,43 @@ The committed config is the full 10-epoch run. `SUBSET_FRACTION` and
 
 Same image, three environments:
 
-| Environment | Device | Seconds/epoch (2500 images) |
+### Model
+
+Full 10-epoch run on all 50,000 CIFAR-10 training images:
+
+| | |
+|---|---|
+| Validation accuracy | **87.18%** |
+| Validation loss | 0.3947 |
+| Training accuracy | 89.41% |
+| Wall clock | 8 h 10 m, CPU only |
+
+A 2.2 point train/validation gap, and validation loss still falling at epoch 10
+— the run ended on its epoch budget, not on convergence. Early stopping did not
+fire: epoch 8 regressed and incremented the patience counter, epoch 9 improved
+and reset it.
+
+### Throughput
+
+Seconds per epoch, same image, 2,500 images (5% subset):
+
+| Environment | Device | s/epoch |
 |---|---|---|
 | Local virtualenv | `mps` | 4.7 |
 | Docker container, all CPUs | `cpu` | 52 |
 | Kubernetes Job, 2 CPU limit | `cpu` | 258 |
 
 Metal is unreachable from a Linux container, so every containerised run is
-CPU-bound — a 55x spread between the fastest and slowest path for identical
-code. Two epochs on 5% of CIFAR-10 reach ~30% validation accuracy against a 10%
-chance baseline.
+CPU-bound — a 55x spread for identical code.
 
 The Docker and Kubernetes runs produced **identical** metrics
-(`train_loss: 2.0292`, `val_accuracy: 0.296`), because both used the same seed
+(`train_loss: 2.0292`, `val_accuracy: 0.296`) because both used the same seed
 and the same `NUM_WORKERS=2`. Results are reproducible across environments for a
 fixed worker count.
+
+Short runs (5% subset, 2 epochs) are what the Docker and Kubernetes
+demonstrations use — a 3-4 minute Job exercises the pipeline better than an
+8-hour one. Both checkpoints are real; the choice is deliberate.
 
 Images: `mlops-train:v1` 1.39GB, `mlops-serve:v1` 1.43GB. Serving is larger
 because both carry PyTorch and serving adds the web stack — it excludes every
