@@ -61,46 +61,147 @@ jobs:
       - name: Run tests
         run: pytest tests -v
 
-  docker-build:
-    name: Docker images build
+  docker:
+    name: Docker build and integration
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      # The Dockerfiles land in a later PR; skip cleanly until they exist
-      # so early pull requests do not fail on a job that cannot run yet.
-      - name: Detect Dockerfiles
-        id: detect
-        run: |
-          if [ -f docker/Dockerfile.train ] && [ -f docker/Dockerfile.serve ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Dockerfiles not present yet - skipping image build."
-          fi
-
       - name: Set up Buildx
-        if: steps.detect.outputs.present == 'true'
         uses: docker/setup-buildx-action@v3
 
+      # load: true puts the image in the runner's Docker daemon so the
+      # integration steps below can actually run it.
       - name: Build training image
-        if: steps.detect.outputs.present == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile.train
           push: false
+          load: true
           tags: mlops-train:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Build serving image
-        if: steps.detect.outputs.present == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile.serve
           push: false
+          load: true
           tags: mlops-serve:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # CIFAR-10 comes from a university host that has been slow and is a
+      # single point of failure. Caching it keeps the job off that host on
+      # every run but the first.
+      - name: Cache CIFAR-10
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: cifar10-python-v1
+
+      - name: Install test helpers
+        run: pip install --quiet pillow==12.3.0
+
+      # ---------------------------------------------------------------
+      # The integration test proper.
+      #
+      # Unit tests exercise each piece in isolation. This exercises them
+      # against each other, in containers, in the order Kubernetes uses:
+      # serving starts BEFORE a checkpoint exists.
+      #
+      # That ordering is what exposed the liveness-probe restart loop on
+      # the cluster (see docs/DECISIONS.md D-023) and what no local test
+      # reproduced, because locally the checkpoint always already existed.
+      # ---------------------------------------------------------------
+      - name: Integration - serving starts before any checkpoint exists
+        run: |
+          set -euo pipefail
+          mkdir -p data checkpoints
+          docker run -d --name serve -p 8080:8080 \
+            -v "$PWD/checkpoints:/app/checkpoints" mlops-serve:ci
+          sleep 10
+
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health)
+          echo "GET /health with no checkpoint -> $code"
+          test "$code" = "503"
+
+          curl -s http://localhost:8080/health | tee /dev/stderr | grep -q '"model_loaded":false'
+          test "$(docker inspect -f '{{.State.Running}}' serve)" = "true"
+
+      - name: Integration - train one epoch in a container
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD/data:/app/data" \
+            -v "$PWD/checkpoints:/app/checkpoints" \
+            -e SUBSET_FRACTION=0.02 -e MAX_EPOCHS=1 -e NUM_WORKERS=0 \
+            mlops-train:ci | tee train.log
+
+          grep -q '"event": "training_complete"' train.log
+          grep -q '"event": "checkpoint_saved"' train.log
+          test -f checkpoints/classifier_v1.pt
+          echo "checkpoint written: $(stat -c%s checkpoints/classifier_v1.pt) bytes"
+
+      - name: Integration - the running pod becomes ready by itself
+        run: |
+          set -euo pipefail
+          # No restart, no redeploy: serve.py retries the load on each health
+          # call, so the container that was 503 must turn 200 on its own.
+          code=000
+          for _ in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/health)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          echo "GET /health after training -> $code"
+          test "$code" = "200"
+
+          restarts=$(docker inspect -f '{{.RestartCount}}' serve)
+          echo "container restarts: $restarts"
+          test "$restarts" = "0"
+
+          # The HEALTHCHECK must agree with the endpoint.
+          for _ in $(seq 1 20); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' serve)
+            [ "$status" = "healthy" ] && break
+            sleep 3
+          done
+          echo "container health: $status"
+          test "$status" = "healthy"
+
+      - name: Integration - prediction through the API
+        run: |
+          set -euo pipefail
+          python -c "from PIL import Image; Image.new('RGB',(64,64),(90,140,200)).save('t.png')"
+          curl -s -X POST http://localhost:8080/predict -F "image=@t.png" -o prediction.json
+          cat prediction.json
+
+          python - <<'PY'
+          import json
+          body = json.load(open("prediction.json"))
+          probs = body["probabilities"]
+          assert len(probs) == 10, f"expected 10 classes, got {len(probs)}"
+          assert abs(sum(probs.values()) - 1.0) < 1e-3, f"probabilities sum to {sum(probs.values())}"
+          assert body["predicted_class"] in probs, "predicted class is not one of the classes"
+          assert 0.0 <= body["confidence"] <= 1.0
+          print("prediction OK:", body["predicted_class"], body["confidence"])
+          PY
+
+      - name: Integration - metadata reflects the trained checkpoint
+        run: |
+          set -euo pipefail
+          curl -s http://localhost:8080/metadata | tee /dev/stderr \
+            | grep -q '"architecture":"resnet18"'
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs serve || true
+
+      - name: Tear down
+        if: always()
+        run: docker rm -f serve || true
