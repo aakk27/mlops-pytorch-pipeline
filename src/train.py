@@ -140,6 +140,55 @@ def select_device() -> torch.device:
     return torch.device("cpu")
 
 
+class EarlyStopping:
+    """Tracks validation loss, deciding when to checkpoint and when to stop.
+
+    Extracted from the training loop so the bookkeeping can be tested without
+    running an epoch. The rules are:
+
+    * An epoch *improves* if its validation loss is strictly lower than the best
+      seen so far. Only an improving epoch is checkpointed, so the file on disk
+      is always the best model rather than the most recent one.
+    * A non-improving epoch increments a counter. The counter resets on the next
+      improvement — patience counts *consecutive* failures, not cumulative ones.
+    * Training stops once the counter reaches ``patience``.
+
+    The reset matters. A single bad epoch in an otherwise improving run should
+    not end training, and in the full 10-epoch run it did not: epoch 8 regressed
+    and set the counter to 1, epoch 9 improved and reset it to 0, and the run
+    continued to a better result at epoch 10.
+    """
+
+    def __init__(self, patience: int) -> None:
+        if patience < 1:
+            raise ValueError(f"patience must be at least 1, got {patience}")
+        self.patience = patience
+        self.best_loss = float("inf")
+        self.best_accuracy = 0.0
+        self.best_epoch = 0
+        self.counter = 0
+
+    @property
+    def should_stop(self) -> bool:
+        """True once validation loss has failed to improve `patience` times."""
+        return self.counter >= self.patience
+
+    def update(self, epoch: int, val_loss: float, val_accuracy: float) -> bool:
+        """Record one epoch's result.
+
+        Returns True if this epoch improved on the best loss so far, which is
+        the caller's signal to write a checkpoint.
+        """
+        if val_loss < self.best_loss:
+            self.best_loss = val_loss
+            self.best_accuracy = val_accuracy
+            self.best_epoch = epoch
+            self.counter = 0
+            return True
+        self.counter += 1
+        return False
+
+
 def train_one_epoch(
     model: nn.Module,
     loader: torch.utils.data.DataLoader,
@@ -251,10 +300,7 @@ def main() -> int:
     optimizer = torch.optim.Adam(model.parameters(), lr=float(train_cfg["learning_rate"]))
     criterion = nn.CrossEntropyLoss()
 
-    best_val_loss = float("inf")
-    best_val_accuracy = 0.0
-    patience_counter = 0
-    patience = int(train_cfg["early_stopping_patience"])
+    stopper = EarlyStopping(patience=int(train_cfg["early_stopping_patience"]))
 
     checkpoint_dir = Path(out_cfg["checkpoint_dir"])
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -276,10 +322,7 @@ def main() -> int:
             epoch_seconds=round(time.time() - epoch_started, 1),
         )
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            best_val_accuracy = val_acc
-            patience_counter = 0
+        if stopper.update(epoch, val_loss, val_acc):
             # The checkpoint carries everything the serving container needs to
             # rebuild the model, so serve.py never has to guess the architecture.
             torch.save(
@@ -297,16 +340,16 @@ def main() -> int:
             )
             log(event="checkpoint_saved", path=str(save_path), epoch=epoch)
         else:
-            patience_counter += 1
-            log(event="no_improvement", epoch=epoch, patience_counter=patience_counter)
-            if patience_counter >= patience:
-                log(event="early_stopping", epoch=epoch, patience=patience)
+            log(event="no_improvement", epoch=epoch, patience_counter=stopper.counter)
+            if stopper.should_stop:
+                log(event="early_stopping", epoch=epoch, patience=stopper.patience)
                 break
 
     log(
         event="training_complete",
-        best_val_loss=round(best_val_loss, 4),
-        best_val_accuracy=round(best_val_accuracy, 4),
+        best_val_loss=round(stopper.best_loss, 4),
+        best_val_accuracy=round(stopper.best_accuracy, 4),
+        best_epoch=stopper.best_epoch,
         checkpoint=str(save_path),
         # training_seconds covers the epoch loop alone; total_seconds is
         # wall-clock for the whole process and includes dataset preparation.
