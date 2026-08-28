@@ -61,7 +61,7 @@ docker/       Dockerfile.train, Dockerfile.serve
 k8s/          namespace, configmap, pvc, training-job,
               serving-deployment, serving-service, hpa, secret.example
 requirements/ train.txt, serve.txt  (all versions pinned)
-tests/        test_model.py, test_serve.py  (22 tests)
+tests/        test_model.py, test_serve.py, test_train.py  (52 tests)
 docs/         PLAN, DECISIONS, RUNBOOK, EVIDENCE, BACKLOG,
               REFLECTION, logs/
 ```

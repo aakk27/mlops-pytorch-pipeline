@@ -230,20 +230,41 @@ or a pre-populated volume would make cold starts predictable.
 
 ## 6. Testing
 
-### 6.1 No test covers the environment-override logic
-**Priority: high · Effort: small**
+### 6.1 ~~No test covers the environment-override logic~~ — RESOLVED
+**Closed 2026-08-28**
 
-`apply_env_overrides()` is the mechanism every Docker and Kubernetes run depends
-on, and its behaviour — including silently ignoring malformed values — is
-verified only by a scratch script that was never committed. It should be a
-proper parametrised test.
+`tests/test_train.py` now covers it with 14 tests: every documented variable
+lands in the right section with the right type, malformed values fall back to
+YAML *and* are logged, empty strings are treated as unset, a missing section is
+created rather than raising, and both the applied-override and
+invalid-override log events are asserted.
 
-### 6.2 No test for early stopping
-**Priority: medium · Effort: small**
+One test is a guard rather than a behaviour check:
+`test_every_documented_variable_is_covered` compares `ENV_OVERRIDES` against the
+parametrised list, so adding an override without a test fails the suite.
 
-The patience logic has been exercised repeatedly by real runs and works, but
-nothing pins it. A test feeding a synthetic loss sequence would catch a
-regression in the counter or the "save only on improvement" rule.
+Configuration resolution is covered too — `TRAINING_CONFIG_PATH` winning over
+the search order, and a missing explicit path raising rather than silently
+falling through to a different config. That second case matters: falling back
+would train on settings nobody asked for, with logs that look entirely normal.
+
+### 6.2 ~~No test for early stopping~~ — RESOLVED
+**Closed 2026-08-28**
+
+The logic was inline in `main()` and could not be tested without running a full
+training loop, so it was extracted into an `EarlyStopping` class. Behaviour is
+unchanged; `main()` now delegates the bookkeeping.
+
+Sixteen tests cover it, including the rule most easily got wrong: patience
+counts *consecutive* failures, so an improvement resets the counter. One test
+replays the actual validation losses from the 10-epoch run — where epoch 8
+regressed and epoch 9 recovered — and asserts the run completes all ten epochs
+with epoch 10 as the best. A naive implementation that never resets would have
+stopped at epoch 8 and shipped a worse model.
+
+Also covered: equal loss is not an improvement (the comparison is strict), the
+reported best metrics track the best epoch rather than the last, and a patience
+below 1 is rejected instead of stopping before any epoch can fail.
 
 ### 6.3 No integration test in CI
 **Priority: medium · Effort: medium**
@@ -291,6 +312,6 @@ If someone picked this up tomorrow:
 
 1. **Registry and SHA tags** (4.1, 4.2) — everything else in ops depends on it
 2. **Checkpoint versioning** (2.2) — currently one Job run away from data loss
-3. **Env-override and early-stopping tests** (6.1, 6.2) — cheap, and they guard the most load-bearing logic
+3. ~~**Env-override and early-stopping tests**~~ — done, 2026-08-28
 4. ~~**The full training run**~~ — done, 2026-08-27
 5. **Integration test in CI** (6.3) — would have caught the bug that cost the most time here
