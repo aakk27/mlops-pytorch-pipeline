@@ -4,6 +4,7 @@
 **Assignment:** Assignment 2 — Deploying PyTorch ML Workloads with Docker & Kubernetes
 **Course:** DA5402W — MLOps & Infrastructure for Machine Learning, IIT Madras
 **Started:** 2026-08-25
+**Last updated:** 2026-08-28
 
 This document is the single source of truth for what the assignment asks, where
 each requirement is satisfied in this repository, and what state it is in. It is
@@ -23,9 +24,9 @@ satisfies it, so a reviewer can go straight from a mark to the code.
 | A1 | Public GitHub repository named `mlops-pytorch-pipeline` | [github.com/aakk27/mlops-pytorch-pipeline](https://github.com/aakk27/mlops-pytorch-pipeline) | Done |
 | A2 | Prescribed directory structure | `src/`, `configs/`, `docker/`, `k8s/`, `requirements/`, `tests/`, `.github/workflows/` | Done |
 | A3 | `develop` branch cut from `main` | `develop` | Done |
-| A4 | All work on feature branches | 5 feature/docs branches, no direct commits to `develop` or `main` | Done |
-| A5 | Every feature branch merged via PR with a meaningful description | PRs #1-#6 | Done |
-| A6 | Minimum 2 PRs week 1, 2 PRs week 2 | 6 PRs, one per stage plus the release PR | Done |
+| A4 | All work on feature branches | 9 feature/docs branches, no direct commits to `develop` or `main` | Done |
+| A5 | Every feature branch merged via PR with a meaningful description | PRs #1-#13 | Done |
+| A6 | Minimum 2 PRs week 1, 2 PRs week 2 | 13 PRs spread across the working days, three of them releases to `main` | Done |
 | A7 | Conventional Commits | `chore`, `feat`, `fix`, `ci`, `docs` scopes throughout | Done |
 | A8 | `.gitignore` | `.gitignore` — datasets, checkpoints, `.env`, secret manifests | Done |
 | A9 | Secrets management | `.env.example`, `k8s/secret.example.yaml`, `*secret*.yaml` excluded by `.gitignore` | Done |
@@ -94,11 +95,11 @@ satisfies it, so a reviewer can go straight from a mark to the code.
 
 | # | Requirement | Where satisfied | Status |
 |---|---|---|---|
-| S1 | All code merged to `main` via PRs | Release PR `develop` → `main` | Done |
+| S1 | All code merged to `main` via PRs | Release PRs #7, #11 and #13, `develop` → `main` | #7 and #11 merged, #13 pending |
 | S2 | README with setup instructions | `README.md` | Done |
 | S3 | README with architecture diagram | `README.md` (Mermaid) | Done |
-| S4 | At least 4 merged PRs with meaningful descriptions | 6 PRs | Done |
-| S5 | 300–500 word reflection write-up | `docs/REFLECTION.md` (502 words) | Done |
+| S4 | At least 4 merged PRs with meaningful descriptions | 13 PRs | Done |
+| S5 | 300–500 word reflection write-up | `docs/REFLECTION.md` (489 words) | Done |
 
 ---
 
@@ -127,11 +128,17 @@ satisfies it, so a reviewer can go straight from a mark to the code.
 | 1b | `docs/traceability` | #3 | `docs/PLAN.md`, `DECISIONS.md`, `RUNBOOK.md`, `EVIDENCE.md` | **Merged** |
 | 2 | `feature/docker-training` | #4 | `Dockerfile.train`, `Dockerfile.serve`, local build/run evidence | **Merged** |
 | 3 | `feature/k8s-deployment` | #5 | All `k8s/` manifests including HPA and the GPU bonus block | **Merged** |
-| 4 | `feature/e2e-validation` | #6 | Cluster run evidence, README, architecture diagram, reflection | In review |
-| — | `develop` → `main` | #7 | Release PR | Pending |
+| 4 | `feature/e2e-validation` | #6 | Cluster run evidence, README, architecture diagram, reflection | **Merged** |
+| — | `develop` → `main` | #7 | First release PR — Parts A-F on `main` | **Merged** |
+| 5 | `feature/full-training-run` | #8 | Full 10-epoch run on all of CIFAR-10, 87.18% validation accuracy | **Merged** |
+| 6 | `feature/test-coverage` | #9 | 30 tests for config resolution, environment overrides and early stopping | **Merged** |
+| 7 | `feature/ci-integration-test` | #10 | CI builds both images and runs the serving container end to end | **Merged** |
+| — | `develop` → `main` | #11 | Second release PR — full run, tests, CI integration | **Merged** |
+| 8 | `docs/final-updates` | #12 | Final plan and reflection updates | Open |
+| — | `develop` → `main` | #13 | Third release PR | Pending |
 
 Branching model: feature branches are cut from `develop` and merged into
-`develop` by PR; `develop` is merged into `main` once by a final release PR.
+`develop` by PR; `main` only ever receives a release PR from `develop`.
 
 ---
 
@@ -142,7 +149,8 @@ Branching model: feature branches are cut from `develop` and merged into
 | 1 | Stages 0, 1, 1b; install Docker, minikube, kubectl | Cluster verified `Ready` on day 1 — removes the largest schedule risk |
 | 2 | Stage 2 — Docker images, local verification | Wall-clock dominated by the first image build |
 | 3 | Stage 3 — Kubernetes manifests and cluster run | Highest-risk day |
-| 4 | Stage 4 — README, diagram, reflection, merges, submission | |
+| 4 | Stage 4 — README, diagram, reflection, first release PR | |
+| 5-6 | Full training run, test coverage, CI integration test, final docs | Follow-up work after the deadline pressure was off |
 
 One PR per day also produces a commit history that reads as sustained work
 rather than a single burst, which matches the brief's "2 PRs per week" intent.
@@ -169,8 +177,8 @@ rather than a single burst, which matches the brief's "2 PRs per week" intent.
 
 ## 6. Late findings
 
-Two things only the live cluster revealed, both recorded in full in
-`docs/DECISIONS.md`:
+Four things that only running the system revealed. The first two are recorded in
+full in `docs/DECISIONS.md`:
 
 **The liveness probe restart loop (D-023).** Serving pods entered
 `CrashLoopBackOff` while waiting for a checkpoint that did not exist yet.
@@ -182,6 +190,18 @@ downloading CIFAR-10 against 520.5 seconds of training. With the PVC warm the
 same step took 1.4 seconds. This is the measured justification for separating
 the dataset and checkpoint claims.
 
+**The CI job could not import `fastapi`.** The test job installed only
+`requirements/train.txt`, so the serving tests were failing on a missing
+dependency rather than on anything real. Fixed by installing both requirement
+files; PR #10 then added an integration test that builds both images and drives
+the serving container, so a break of that kind fails the build instead of
+hiding in it.
+
+**A stale `eval $(minikube docker-env)` produced three unrelated-looking
+symptoms.** A 38-minute CIFAR-10 re-download, an empty `checkpoints-full/`, and
+an out-of-memory kill all traced back to one shell still pointed at minikube's
+Docker daemon. `eval $(minikube docker-env -u)` fixed all three at once.
+
 ---
 
 ## 7. Known gaps
@@ -191,6 +211,8 @@ deviations from the brief, and 28 items of follow-up work across correctness,
 security, operations, ML quality, testing and documentation — each with a
 priority, an effort estimate, and the reasoning behind leaving it.
 
-The only gap still open against the brief itself is the full 10-epoch training
-run on the complete dataset. Everything else is either satisfied or a documented
-trade.
+Four of those items have since been closed across three PRs: the full 10-epoch run on all of
+CIFAR-10 (PR #8, 87.18% validation accuracy), tests for the environment
+overrides and for early stopping (PR #9), and the CI integration test (PR #10).
+Nothing remains open against the brief itself — everything left in the backlog
+is a documented trade rather than a missing requirement.
