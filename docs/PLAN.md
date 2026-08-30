@@ -4,7 +4,7 @@
 **Assignment:** Assignment 2 — Deploying PyTorch ML Workloads with Docker & Kubernetes
 **Course:** DA5402W — MLOps & Infrastructure for Machine Learning, IIT Madras
 **Started:** 2026-08-25
-**Last updated:** 2026-08-28
+**Last updated:** 2026-08-30
 
 This document is the single source of truth for what the assignment asks, where
 each requirement is satisfied in this repository, and what state it is in. It is
@@ -25,8 +25,8 @@ satisfies it, so a reviewer can go straight from a mark to the code.
 | A2 | Prescribed directory structure | `src/`, `configs/`, `docker/`, `k8s/`, `requirements/`, `tests/`, `.github/workflows/` | Done |
 | A3 | `develop` branch cut from `main` | `develop` | Done |
 | A4 | All work on feature branches | 9 feature/docs branches, no direct commits to `develop` or `main` | Done |
-| A5 | Every feature branch merged via PR with a meaningful description | PRs #1-#13 | Done |
-| A6 | Minimum 2 PRs week 1, 2 PRs week 2 | 13 PRs spread across the working days, three of them releases to `main` | Done |
+| A5 | Every feature branch merged via PR with a meaningful description | PRs #1-#15 | Done |
+| A6 | Minimum 2 PRs week 1, 2 PRs week 2 | 15 PRs spread across the working days, four of them releases to `main` | Done |
 | A7 | Conventional Commits | `chore`, `feat`, `fix`, `ci`, `docs` scopes throughout | Done |
 | A8 | `.gitignore` | `.gitignore` — datasets, checkpoints, `.env`, secret manifests | Done |
 | A9 | Secrets management | `.env.example`, `k8s/secret.example.yaml`, `*secret*.yaml` excluded by `.gitignore` | Done |
@@ -88,17 +88,17 @@ satisfies it, so a reviewer can go straight from a mark to the code.
 |---|---|---|---|
 | F1 | Apply namespace, configmap, training job | `docs/RUNBOOK.md` §5, `docs/EVIDENCE.md` | Done |
 | F2 | Deploy serving layer and HPA | `docs/RUNBOOK.md` §5, `k8s/hpa.yaml` | Done |
-| F3 | Verify pods running and healthy | `docs/EVIDENCE.md` | Done |
-| F4 | Port-forward and test `/predict` | `docs/EVIDENCE.md` | Done |
+| F3 | Verify pods running and healthy | `docs/EVIDENCE.md`, `docs/validation-screenshots.pdf` | Done |
+| F4 | Port-forward and test `/predict` | `docs/EVIDENCE.md`, `docs/validation-screenshots.pdf` | Done |
 
 ### Submission
 
 | # | Requirement | Where satisfied | Status |
 |---|---|---|---|
-| S1 | All code merged to `main` via PRs | Release PRs #7, #11 and #13, `develop` → `main` | #7 and #11 merged, #13 pending |
+| S1 | All code merged to `main` via PRs | Release PRs #7, #11, #13 and #15, `develop` → `main` | #7, #11, #13 merged, #15 pending |
 | S2 | README with setup instructions | `README.md` | Done |
 | S3 | README with architecture diagram | `README.md` (Mermaid) | Done |
-| S4 | At least 4 merged PRs with meaningful descriptions | 13 PRs | Done |
+| S4 | At least 4 merged PRs with meaningful descriptions | 15 PRs | Done |
 | S5 | 300–500 word reflection write-up | `docs/REFLECTION.md` (489 words) | Done |
 
 ---
@@ -134,8 +134,10 @@ satisfies it, so a reviewer can go straight from a mark to the code.
 | 6 | `feature/test-coverage` | #9 | 30 tests for config resolution, environment overrides and early stopping | **Merged** |
 | 7 | `feature/ci-integration-test` | #10 | CI builds both images and runs the serving container end to end | **Merged** |
 | — | `develop` → `main` | #11 | Second release PR — full run, tests, CI integration | **Merged** |
-| 8 | `docs/final-updates` | #12 | Final plan and reflection updates | Open |
-| — | `develop` → `main` | #13 | Third release PR | Pending |
+| 8 | `docs/final-updates` | #12 | Final plan and reflection updates | **Merged** |
+| — | `develop` → `main` | #13 | Third release PR | **Merged** |
+| 9 | `docs/validation-screenshots` | #14 | Submission screenshots and the 2026-08-30 re-run evidence | Open |
+| — | `develop` → `main` | #15 | Fourth release PR | Pending |
 
 Branching model: feature branches are cut from `develop` and merged into
 `develop` by PR; `main` only ever receives a release PR from `develop`.
