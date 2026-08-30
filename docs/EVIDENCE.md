@@ -755,3 +755,63 @@ backlog.
 `docs/BACKLOG.md` deviation 1 is closed: the brief's literal verification
 command has now been run to completion. Section 5.1, "the model is barely
 trained", no longer applies to this checkpoint.
+
+
+---
+
+## Stage 6 — Validation screenshots (2026-08-30)
+
+Captured for submission, on a cluster restarted from `Stopped` rather than
+recreated. `docs/validation-screenshots.pdf` holds the terminal captures.
+
+### What the cluster looked like on restart
+
+`minikube start` brought back a node aged 5d with both PVCs still `Bound`
+(4d8h) and `mlops-train:v1` / `mlops-serve:v1` still in the node's Docker
+daemon. The serving Deployment came back on its own. The training Job was gone,
+deleted by its own `ttlSecondsAfterFinished: 3600` — backlog item 4.4 predicted
+exactly this, and it cost a re-run to produce the evidence.
+
+### The re-run
+
+```
+{"event": "data_ready",         "data_seconds": 4.5}
+{"epoch": 1, "val_accuracy": 0.296, "epoch_seconds": 274.8}
+{"epoch": 2, "val_accuracy": 0.256, "epoch_seconds": 260.1}
+{"event": "training_complete",  "training_seconds": 535.1, "total_seconds": 540.0}
+```
+
+`data_seconds: 4.5` against the cold run's 1992.6 is the dataset PVC earning its
+place: the same Job, the same image, 443x faster to reach the first batch.
+
+The epochs took 274.8s and 260.1s. The estimate carried in
+`k8s/training-job.yaml` is ~52s, measured on an otherwise idle cluster; this run
+shared a 4-CPU node with a freshly re-enabled metrics-server and a rolling
+restart. The estimate in the manifest comment is left as it was measured, but it
+holds only for an idle node.
+
+### Rolling update
+
+`kubectl rollout restart` produced the behaviour `maxUnavailable: 0` is meant to
+guarantee — the replacement pod reached `1/1 Running` at 16s, and only then did
+the first old pod begin `Terminating`. Capacity never dropped below two.
+
+### Final state
+
+| Check | Result |
+|---|---|
+| `job/model-training` | `Complete 1/1`, duration 9m8s |
+| Serving pods | 2 x `1/1 Running`, `RESTARTS 0` |
+| `service/model-serving` | `ClusterIP 10.96.208.247`, `80/TCP` |
+| HPA | `cpu: 0%/70%, memory: 40%/80%`, 2/5 replicas |
+| `POST /predict` | `cat` at 0.2227 across a flat distribution |
+
+The flat prediction is the demo sizing showing through: `SUBSET_FRACTION=0.05`
+and `MAX_EPOCHS=2` produce a 29.6% model, and a 29.6% model is not confident
+about anything. The 87.18% checkpoint from Stage 5 is the one to judge the
+training code by; this one exists to prove the path from Job to PVC to pod.
+
+One gap worth naming: the HPA read `cpu: <unknown>/70%` in the first capture and
+only settled to `0%/70%` a few minutes later, because metrics-server had just
+been re-enabled and had not completed a scrape cycle. Both captures are in the
+PDF rather than only the flattering one.
